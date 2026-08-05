@@ -31,3 +31,28 @@ yarn-error.log*
 
 # Cached TTS audio (regenerated on demand; see AGENT_TTS_CACHE_DIR)
 agent/.tts_cache/
+
+# ---------------------------------------------------------------------------
+# Internal-only files. BOTH GitHub remotes for this project are PUBLIC, so
+# anything tracked here is world-readable. These stay on disk but out of git.
+# ---------------------------------------------------------------------------
+
+# Security audit tracker. Lists the holes that are still OPEN (short JWT_SECRET,
+# token in localStorage, no BYO-number ownership proof, call quota off). Publishing
+# it hands an attacker a prioritised roadmap. Re-add it only after every item is
+# closed, or keep it in a private repo / password manager instead.
+docs/SECURITY-REMEDIATION.md
+
+# Pre-launch checklist. Contains real infra identifiers (Vobiz trunk group ID, the
+# live DID) plus notes on unfixed weaknesses.
+.kiro/steering/pre-launch-checklist.md
+
+# TTS voice-comparison recordings: 5.4 MB of throwaway test audio, regenerated on
+# demand. Repo bloat with no product value.
+docs/tts-compare/
+
+# Local scratch script that loops through common Postgres passwords
+
+# against localhost. Harmless locally, but a password-guessing loop sitting in a
+# public repo looks like an attack tool and adds nothing to the product.
+test_db_conn.py
