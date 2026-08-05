@@ -115,9 +115,15 @@ class _StrictSchemaLLM(openai.LLM):
 # endpoints. Both read from the root .env. If the secret is empty, all DB actions
 # are disabled (the backend returns 401), so set AGENT_INTERNAL_SECRET in .env.
 BACKEND_URL = os.getenv("AGENT_BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
-# Prefer a dedicated secret; fall back to the app's JWT secret so bookings work
-# out of the box (the backend uses the same fallback and reads this same .env).
-INTERNAL_SECRET = os.getenv("AGENT_INTERNAL_SECRET") or os.getenv("JWT_SECRET", "")
+# AGENT_INTERNAL_SECRET only — deliberately NO fallback to JWT_SECRET.
+# The backend dropped that fallback (see backend/services/call_tokens.py and
+# routes/calls.py): reusing the session-signing key as an API credential meant
+# leaking it anywhere in the call path also let an attacker mint user sessions.
+# Keeping the fallback here would be worse than useless — the agent would sign
+# with JWT_SECRET while the backend rejects anything not derived from
+# AGENT_INTERNAL_SECRET, so every booking would 401 for a non-obvious reason.
+# Empty is the honest state: DB actions are disabled and the log line below says so.
+INTERNAL_SECRET = os.getenv("AGENT_INTERNAL_SECRET", "")
 
 # STT language code -> MiniMax TTS language hint (mirrors the backend handler).
 _LANG_BOOST = {
