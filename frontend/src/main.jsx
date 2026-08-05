@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import AppLayout from "./components/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import SuperadminRoute from "./components/SuperadminRoute";
+import StaffRoute from "./components/StaffRoute";
 import ErrorBoundary from "./components/ErrorBoundary";
 import ScreenLoader from "./components/ScreenLoader";
 // Login stays eager: it's the landing page for anyone not signed in, so lazy
@@ -55,8 +56,25 @@ ReactDOM.createRoot(document.getElementById("root")).render(
                       <Route path="/contacts/:id" element={<ContactDetail />} />
                       <Route path="/appointments" element={<Appointments />} />
                       <Route path="/messages" element={<Messages />} />
-                      <Route path="/setup" element={<Setup />} />
-                      <Route path="/billing" element={<Billing />} />
+                      {/* Setup and Billing are owner/admin concerns, so staff are
+                          kept out of them. Server-side checks still apply — this is
+                          navigation, not authorisation. */}
+                      <Route
+                        path="/setup"
+                        element={
+                          <StaffRoute>
+                            <Setup />
+                          </StaffRoute>
+                        }
+                      />
+                      <Route
+                        path="/billing"
+                        element={
+                          <StaffRoute>
+                            <Billing />
+                          </StaffRoute>
+                        }
+                      />
                       <Route path="/account" element={<Account />} />
                       <Route
                         path="/admin"

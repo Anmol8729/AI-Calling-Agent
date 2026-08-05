@@ -58,8 +58,60 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # The database is hosted on Supabase (Postgres); no local DB container.
-  # Set DATABASE_URL in .env to the Supabase connection string.
+  # ----- optional local Postgres, for development without Supabase -----------
+  # Behind a PROFILE, so it does not start by default:
+  #     docker compose up                          -> api + redis only
+  #     docker compose --profile local-db up        -> also starts this
+  #
+  # Off by default because the application points at Supabase (see DB_HOST in
+  # .env), so a container started here would sit idle while looking like the
+  # database the app is using — a confusing thing to debug.
+  #
+  # Three changes from the version this was merged from, all for the same reason
+  # the Redis service below is locked down:
+  #   * the port binds to 127.0.0.1 only, instead of every interface. Published as
+  #     "5432:5432" it was reachable from the network.
+  #   * the password is REQUIRED rather than defaulting to "postgres". A weak
+  #     default on a reachable port is how databases get taken over.
+  #   * a healthcheck, so `depends_on` waits for readiness instead of merely for
+  #     the process to exist.
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["local-db"]
+    restart: unless-stopped
+    environment:
+      # A SEPARATE variable, not DB_USER/DB_PASSWORD. Those hold the Supabase
+      # credentials, and feeding the production database password into a local
+      # container would put it in the container environment and in `docker inspect`
+      # output for no benefit.
+      POSTGRES_USER: ${LOCAL_DB_USER:-clarivo}
+      # Empty default rather than `:?`. Compose interpolates every variable in the
+      # file whether or not the service's profile is selected, so a `:?` guard here
+      # would break plain `docker compose up` too. Empty is still safe: the Postgres
+      # image refuses to initialise without a password and says so plainly, so this
+      # fails loudly the moment someone actually uses the profile — and never
+      # silently comes up with a guessable one.
+      POSTGRES_PASSWORD: ${LOCAL_DB_PASSWORD:-}
+      POSTGRES_DB: ${LOCAL_DB_NAME:-clarivo}
+    ports:
+      # Host-only. Change to "5432:5432" only if something off-box must connect,
+      # and understand that exposes the database to your network.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   redis:
     image: redis:7.4-alpine
@@ -107,3 +159,4 @@ services:
 
 volumes:
   redis_data:
+  postgres_data:

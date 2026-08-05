@@ -209,6 +209,22 @@ class Patient(Base):
     gender = mapped_column(String(20), nullable=True)
     history = mapped_column(JSONB, nullable=False, default=list)
     follow_up_notes = mapped_column(Text, nullable=True)
+    # "agent" = created by the voice agent during a live call.
+    # "manual" = created by a logged-in user from the Contacts page.
+    # server_default as well as default: this column is NOT NULL and the table
+    # already holds rows, so the ALTER that adds it needs a value for them. It also
+    # matches what backend/db/schema.sql declares, which keeps autogenerate quiet.
+    source = mapped_column(
+        String(20), nullable=False, default="agent", server_default=text("'agent'")
+    )
+    # The user who manually created this record (NULL for agent-created records
+    # and for any row created before this column was added).
+    created_by = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (

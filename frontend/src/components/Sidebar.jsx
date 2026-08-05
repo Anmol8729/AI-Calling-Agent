@@ -66,9 +66,12 @@ export default function Sidebar({ open, onClose }) {
   const labelOverrides = { "/contacts": labels.contacts, "/appointments": labels.bookings };
 
   // Platform admins get an extra Admin entry (server also enforces access).
-  const navItems = user?.is_superadmin
+  // Staff can only see the core read-only nav items.
+  const STAFF_HIDDEN_PATHS = new Set(["/setup", "/billing", "/admin"]);
+  const navItems = (user?.is_superadmin
     ? [...items, { label: "Admin", path: "/admin", icon: ShieldCheck }]
-    : items;
+    : items
+  ).filter((item) => !(user?.role === "staff" && STAFF_HIDDEN_PATHS.has(item.path)));
 
   const handleLogout = async () => {
     // logout() now also revokes the session server-side, so it is async. Await it

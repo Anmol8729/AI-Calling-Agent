@@ -96,9 +96,14 @@ export default function ContactDetail() {
               <span className="inline-flex items-center gap-1"><Mail className="h-4 w-4 text-gray-400" /> {contact.email || "—"}</span>
             </div>
           </div>
-          <Badge tone={(contact.history && contact.history.length > 0) ? "success" : "neutral"}>
-            {(contact.history && contact.history.length > 0) ? "Returning" : "New"}
-          </Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone={(contact.history && contact.history.length > 0) ? "success" : "neutral"}>
+              {(contact.history && contact.history.length > 0) ? "Returning" : "New"}
+            </Badge>
+            <Badge tone={contact.source === "manual" ? "neutral" : "dark"}>
+              {contact.source === "manual" ? "Manual" : "Agent"}
+            </Badge>
+          </div>
         </div>
         {(contact.gender || contact.age || contact.follow_up_notes) && (
           <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">

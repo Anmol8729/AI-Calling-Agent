@@ -22,6 +22,14 @@ import pytest
 BASE_URL = os.getenv("TEST_API_BASE", "http://127.0.0.1:8000")
 PASSWORD = "Str0ng!Passw0rd-Test"
 
+# Fixed numbers these tests claim. Fixed on purpose — the point is to prove a number
+# can be claimed only once platform-wide — which is exactly why they must be released
+# before every run as well as after.
+TEST_NUMBERS = [
+    "+919000000201", "919000000201",
+    "+919000000202", "919000000202",
+]
+
 def _db_configured() -> bool:
     """Read through settings, not os.environ: the app loads .env itself, so the
     values are not necessarily exported into the shell running pytest."""
@@ -112,16 +120,44 @@ class Tenant:
         self.headers = {"Authorization": f"Bearer {self.token}"}
 
 
+async def _release_test_numbers():
+    """Free the fixed phone numbers these tests claim.
+
+    Needed at SETUP, not just teardown. Phone numbers are unique platform-wide, so a
+    run that died partway (or a failed assertion inside a test) left one claimed and
+    every later run then failed on "already connected" — a test that only passes once
+    is worse than no test.
+    """
+    from sqlalchemy import delete
+
+    from backend.models import PhoneNumber
+    from backend.services.db import close_db_connection, connect_to_db, get_sessionmaker
+
+    await connect_to_db()
+    Session = get_sessionmaker()
+    async with Session() as session:
+        await session.execute(
+            delete(PhoneNumber).where(PhoneNumber.number.in_(TEST_NUMBERS))
+        )
+        await session.commit()
+    await close_db_connection()
+
+
 @pytest.fixture(scope="module")
 def two_tenants(api):
     import asyncio
 
+    # Clear anything a previous interrupted run left behind before starting.
+    asyncio.run(_release_test_numbers())
     a, b = Tenant(api, "a"), Tenant(api, "b")
     assert a.clinic_id != b.clinic_id, "each signup must create its own tenant"
     try:
         yield a, b
     finally:
         asyncio.run(_purge([a.email, b.email]))
+        # Belt and braces: the numbers are deleted by clinic in _purge, but only if
+        # the clinic link survived. Delete them by number as well.
+        asyncio.run(_release_test_numbers())
 
 
 class TestCrossTenantReads:

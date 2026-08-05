@@ -808,3 +808,130 @@ class TestNewAccountIsNotBornSuspended:
 
         source = inspect.getsource(auth_routes.register)
         assert "is_active" not in source
+
+
+# --------------------------------------------------------------------------
+# Staff role boundary (merged from the teammate's Staff Panel work)
+# --------------------------------------------------------------------------
+class TestStaffRoleBoundary:
+    """Staff are read-mostly members of one tenant.
+
+    The dashboard hides Setup, Billing and Admin from them, but a hidden menu item
+    is not access control — the API has to say no as well. These pin the server-side
+    half so a UI change cannot quietly become the only thing standing in the way.
+    """
+
+    def _guard_of(self, fn) -> str:
+        import inspect
+
+        return inspect.getsource(fn)
+
+    def test_staff_cannot_edit_or_delete_contacts(self):
+        from backend.routes import patients
+
+        assert "require_non_staff" in self._guard_of(patients.update_patient)
+        assert "require_non_staff" in self._guard_of(patients.delete_patient)
+
+    def test_staff_can_still_read_and_create_contacts(self):
+        """Deliberate: a receptionist has to be able to add a walk-in."""
+        from backend.routes import patients
+
+        assert "require_non_staff" not in self._guard_of(patients.list_patients)
+        assert "require_non_staff" not in self._guard_of(patients.create_patient)
+
+    def test_staff_cannot_change_business_settings(self):
+        """This payload carries the AI system prompt, the knowledge base and the
+        WhatsApp access token. It was reachable by staff even though the UI hid it."""
+        from backend.routes import clinics
+
+        assert "require_non_staff" in self._guard_of(clinics.update_settings)
+
+    def test_staff_cannot_spend_money(self):
+        from backend.routes import billing
+
+        for fn in (billing.checkout, billing.verify_payment, billing.request_upgrade):
+            assert "require_non_staff" in self._guard_of(fn), fn.__name__
+
+    def test_staff_cannot_create_more_staff(self):
+        """Otherwise the role is self-propagating and the boundary is meaningless."""
+        from backend.routes import auth as auth_routes
+
+        source = self._guard_of(auth_routes.create_staff)
+        assert 'require_roles(["doctor"])' in source
+
+    def test_staff_creation_is_tenant_scoped(self):
+        """clinic_id from the CALLER, never the payload, or one owner could plant an
+        account inside another tenant."""
+        from backend.routes import auth as auth_routes
+
+        source = self._guard_of(auth_routes.create_staff)
+        assert 'current_user.get("clinic_id")' in source
+        assert "payload.clinic_id" not in source
+
+    def test_staff_role_is_hardcoded_not_client_supplied(self):
+        from backend.routes import auth as auth_routes
+
+        source = self._guard_of(auth_routes.create_staff)
+        assert 'role="staff"' in source
+        assert "payload.role" not in source
+
+    def test_staff_passwords_obey_the_same_policy_as_everyone_else(self):
+        """It shipped with min_length=6, which would have made staff accounts the one
+        place a two-second password was acceptable."""
+        from pydantic import ValidationError
+
+        from backend.routes.auth import StaffCreate
+
+        for weak in ("123456", "password", "abcdefghij"):
+            with pytest.raises(ValidationError):
+                StaffCreate(name="S", email="s@example.com", password=weak)
+        # A compliant one still works.
+        assert StaffCreate(name="S", email="s@example.com", password="Str0ng!Passw0rd")
+
+    def test_creating_a_staff_account_is_audited(self):
+        """Creating a login into a tenant's patient data must be attributable."""
+        from backend.routes import auth as auth_routes
+
+        assert "audit.record" in self._guard_of(auth_routes.create_staff)
+
+    def test_the_frontend_guard_admits_it_is_only_cosmetic(self):
+        """A guard that looks authoritative but is not is worse than none, because
+        the next person trusts it."""
+        import pathlib
+
+        guard = (
+            pathlib.Path(__file__).resolve().parents[2]
+            / "frontend" / "src" / "components" / "StaffRoute.jsx"
+        )
+        text = guard.read_text(encoding="utf-8", errors="ignore")
+        assert "backend still enforces" in text.lower() or "keeps the ui honest" in text.lower()
+
+
+class TestPatientProvenance:
+    """`patients.source` / `created_by`, merged from the Staff Panel work.
+
+    They arrived with a schema.sql entry but no migration. schema.sql is not executed
+    by the application and `create_all` does not ALTER an existing table, so the
+    columns were missing from the live database while the code already wrote to them.
+    """
+
+    def test_the_columns_exist_on_the_model(self):
+        from backend.models import Patient
+
+        assert "source" in Patient.__table__.c
+        assert "created_by" in Patient.__table__.c
+
+    def test_source_has_a_server_default_so_existing_rows_survive_the_alter(self):
+        """NOT NULL added to a populated table needs a value for the rows already
+        there, or the migration aborts."""
+        from backend.models import Patient
+
+        assert Patient.__table__.c.source.nullable is False
+        assert Patient.__table__.c.source.server_default is not None
+
+    def test_deleting_a_user_does_not_delete_their_patients(self):
+        from backend.models import Patient
+
+        fks = list(Patient.__table__.c.created_by.foreign_keys)
+        assert fks, "created_by should reference users.id"
+        assert fks[0].ondelete == "SET NULL"

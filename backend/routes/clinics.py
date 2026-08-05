@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.db import get_db
 from backend.services import audit
-from backend.routes.auth import get_current_user
+from backend.routes.auth import get_current_user, require_non_staff
 from backend.models import Tenant
 from backend.utils.helpers import api_response, serialize_model, to_uuid
 
@@ -69,7 +69,11 @@ async def get_settings(
 async def update_settings(
     payload: ClinicSettingsUpdate,
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    # require_non_staff, not get_current_user: StaffRoute already hides /setup from
+    # staff in the dashboard, but the API was still open to them — and this payload
+    # carries the AI's system prompt, the knowledge base and the WhatsApp access
+    # token. A UI-only restriction is not a restriction.
+    current_user: dict = Depends(require_non_staff),
     db: AsyncSession = Depends(get_db),
 ):
     clinic_id = to_uuid(current_user.get("clinic_id"))

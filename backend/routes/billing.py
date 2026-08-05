@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.config.settings import settings
 from backend.services.db import get_db
 from backend.services import billing_period
-from backend.routes.auth import get_current_user
+from backend.routes.auth import get_current_user, require_non_staff
 from backend.services.plans import list_plans, get_plan, effective_call_limit, is_valid_plan
 from backend.services.email import send_email
 from backend.services.razorpay_client import (
@@ -129,7 +129,9 @@ class UpgradeRequestBody(BaseModel):
 @router.post("/upgrade-request")
 async def request_upgrade(
     body: UpgradeRequestBody,
-    current_user: dict = Depends(get_current_user),
+    # Plan and spend decisions belong to the account owner. StaffRoute already hides
+    # /billing from staff in the dashboard; this makes it true on the API too.
+    current_user: dict = Depends(require_non_staff),
     db: AsyncSession = Depends(get_db),
 ):
     clinic_id = to_uuid(current_user.get("clinic_id"))
@@ -182,7 +184,8 @@ class CheckoutBody(BaseModel):
 @router.post("/checkout")
 async def checkout(
     body: CheckoutBody,
-    current_user: dict = Depends(get_current_user),
+    # Starting a payment is the owner's call, not a staff member's.
+    current_user: dict = Depends(require_non_staff),
     db: AsyncSession = Depends(get_db),
 ):
     if not settings.payments_enabled:
@@ -257,7 +260,8 @@ async def _activate_paid_plan(db: AsyncSession, payment: Payment, payment_id: st
 @router.post("/verify")
 async def verify_payment(
     body: VerifyBody,
-    current_user: dict = Depends(get_current_user),
+    # Pairs with /checkout: whoever may start a payment may confirm it.
+    current_user: dict = Depends(require_non_staff),
     db: AsyncSession = Depends(get_db),
 ):
     clinic_id = to_uuid(current_user.get("clinic_id"))

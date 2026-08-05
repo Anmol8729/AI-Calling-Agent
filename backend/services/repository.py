@@ -169,6 +169,7 @@ async def get_or_create_patient(clinic_id, phone, name=None, age=None, gender=No
                 age=clean_age,
                 gender=clean_gender,
                 history=[],
+                source="agent",
             )
             session.add(patient)
             try:
@@ -228,6 +229,7 @@ async def register_or_update_patient(clinic_id, phone=None, name=None, note=None
                 age=clean_age,
                 gender=clean_gender,
                 history=[note] if note else [],
+                source="agent",
             )
             session.add(patient)
             try:

@@ -114,6 +114,21 @@ def require_roles(allowed_roles: list):
     return role_checker
 
 
+async def require_non_staff(current_user: dict = Depends(get_current_user)):
+    """Dependency that blocks staff-role users from write operations.
+
+    Staff can read but cannot create, edit, or delete patients.
+    Apply this to any patient write route instead of (or alongside) the
+    regular get_current_user dependency.
+    """
+    if current_user.get("role") == "staff":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Staff accounts are read-only and cannot perform this action",
+        )
+    return current_user
+
+
 def is_superadmin(email: str) -> bool:
     """True if the email is in the platform SUPERADMIN_EMAILS allowlist."""
     allow = [e.strip().lower() for e in (settings.SUPERADMIN_EMAILS or "").split(",") if e.strip()]
@@ -822,4 +837,85 @@ async def logout_all_devices(
     return api_response(
         success=True,
         message="Signed out on all devices. Please sign in again.",
+    )
+
+
+class StaffCreate(BaseModel):
+    name: str = Field(..., min_length=1)
+    email: EmailStr
+    # Was min_length=6, which bypassed the policy every other password path
+    # enforces (10 characters, three character classes, common-password blocklist).
+    # A staff account is a real login into a tenant's patient data, so it cannot be
+    # the one place where "123456" is acceptable.
+    password: str = Field(..., min_length=MIN_PASSWORD_LENGTH, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def _strength(cls, v: str) -> str:
+        return validate_password_strength(v)
+
+
+@router.post("/staff")
+@limiter.limit("10/minute")
+async def create_staff(
+    request: Request,
+    payload: StaffCreate,
+    current_user: dict = Depends(require_roles(["doctor"])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a staff account scoped to the calling doctor's clinic.
+
+    Only users with role "doctor" may call this endpoint. The created user
+    inherits the same clinic_id and is assigned role "staff", which grants
+    read-only access to patient data and hides billing/setup nav items.
+
+    Notes on the guarantees here:
+      * `role` is hardcoded, so this cannot be used to mint an admin.
+      * `clinic_id` comes from the CALLER, never the payload, so a doctor can only
+        create staff inside their own tenant.
+      * The account starts unverified. That is deliberate: the owner creating it is
+        vouching for the address, and blocking sign-in on verification would leave
+        new staff unable to work while SMTP is unconfigured.
+    """
+    clinic_id = to_uuid(current_user.get("clinic_id"))
+    if clinic_id is None:
+        return api_response(success=False, message="No clinic associated with your account", status_code=400)
+
+    existing = (await db.execute(select(User).where(User.email == payload.email))).scalar_one_or_none()
+    if existing:
+        return api_response(success=False, message="Email already registered", status_code=400)
+
+    staff = User(
+        email=payload.email,
+        password_hash=get_password_hash(payload.password),
+        name=payload.name.strip(),
+        role="staff",
+        clinic_id=clinic_id,
+    )
+    db.add(staff)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        return api_response(success=False, message="Email already registered", status_code=400)
+
+    # Creating a login into a tenant's patient data is security-relevant, so it must
+    # be attributable — who created this account, when, and from where.
+    await audit.record(
+        "auth.staff_created", actor=current_user, clinic_id=clinic_id,
+        target_type="user", target_id=staff.id,
+        detail={"staff_email": staff.email, "role": staff.role},
+        request=request,
+    )
+
+    return api_response(
+        success=True,
+        message=f"Staff account created for {staff.name}",
+        data={
+            "id": str(staff.id),
+            "email": staff.email,
+            "name": staff.name,
+            "role": staff.role,
+            "clinic_id": str(clinic_id),
+        },
     )

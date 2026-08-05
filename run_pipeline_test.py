@@ -11,21 +11,16 @@ def main():
     # Start backend server
     backend_proc = subprocess.Popen(
         [python_bin, "-m", "backend.app"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
         text=True,
         bufsize=1
     )
     
-    # Give server 4 seconds to boot up and connect to Mongo
+    # Give server 4 seconds to boot up and connect to DB
     time.sleep(4.0)
     
     # Check if backend crashed immediately
     if backend_proc.poll() is not None:
         print("❌ Backend crashed on startup!")
-        stdout, stderr = backend_proc.communicate()
-        print(f"Stdout:\n{stdout}")
-        print(f"Stderr:\n{stderr}")
         return
         
     print("Backend server is running. Running test_websocket.py...")
@@ -46,18 +41,10 @@ def main():
     print("Stopping FastAPI backend...")
     backend_proc.terminate()
     try:
-        stdout, stderr = backend_proc.communicate(timeout=2.0)
-        print("\n--- Backend Server Logs ---")
-        print(stdout)
-        print(stderr)
-        print("---------------------------")
+        backend_proc.wait(timeout=2.0)
     except subprocess.TimeoutExpired:
         backend_proc.kill()
-        stdout, stderr = backend_proc.communicate()
-        print("\n--- Backend Server Logs (Killed) ---")
-        print(stdout)
-        print(stderr)
-        print("------------------------------------")
+        backend_proc.wait()
 
 if __name__ == "__main__":
     main()

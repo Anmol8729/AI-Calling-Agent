@@ -3,6 +3,7 @@ import { useMemo, useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../lib/api";
 import { useLabels } from "../store/clinicStore";
+
 import DataTable from "../components/DataTable";
 import Modal from "../components/Modal";
 import { Badge } from "../components/ui/Badge";
@@ -35,12 +36,18 @@ function formatPatient(p) {
     company: p.gender ? `${p.gender}, Age ${p.age || "N/A"}` : "Contact",
     lastContacted: p.follow_up_notes || "None",
     status: p.history && p.history.length > 0 ? "Returning" : "New",
+    source: p.source || "agent",
   };
 }
 
 export default function Contacts() {
   const labels = useLabels();
   const navigate = useNavigate();
+  // No role check here on purpose: this page only lists and creates contacts, and
+  // staff are permitted both. Editing and deleting live elsewhere and are blocked
+  // server-side by require_non_staff. (An unused `isStaff` was left here by the
+  // Staff Panel work; removed rather than silenced, since there is nothing on this
+  // page for it to gate.)
   const [list, setList] = useState([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -128,6 +135,15 @@ export default function Contacts() {
     { key: "company", header: "Details" },
     { key: "lastContacted", header: "Notes" },
     {
+      key: "source",
+      header: "Source",
+      render: (row) => (
+        <Badge tone={row.source === "manual" ? "neutral" : "dark"}>
+          {row.source === "manual" ? "Manual" : "Agent"}
+        </Badge>
+      ),
+    },
+    {
       key: "status",
       header: "Status",
       render: (row) => <Badge tone={row.status === "Returning" ? "success" : "neutral"}>{row.status}</Badge>,
@@ -152,7 +168,6 @@ export default function Contacts() {
           <UserPlus className="h-4 w-4" /> Add {labels.contact.toLowerCase()}
         </Button>
       </div>
-
       {banner && (
         <div
           className={`flex items-start justify-between gap-3 rounded-2xl border p-4 text-sm ${

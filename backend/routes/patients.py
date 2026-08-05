@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import or_
 
 from backend.services.db import get_db
-from backend.routes.auth import get_current_user
+from backend.routes.auth import get_current_user, require_roles, require_non_staff
 from backend.models import Patient, Appointment, CallLog
 from backend.schemas.patient import PatientCreate
 from backend.utils.helpers import api_response, serialize_model, serialize_models, to_uuid
@@ -48,7 +48,13 @@ async def create_patient(
     if existing.scalar_one_or_none():
         return api_response(success=False, message="Patient with this phone number already exists", status_code=400)
 
-    patient = Patient(clinic_id=clinic_id, **payload.dict())
+    creator_id = to_uuid(current_user.get("id"))
+    patient = Patient(
+        clinic_id=clinic_id,
+        source="manual",
+        created_by=creator_id,
+        **payload.dict(),
+    )
     db.add(patient)
     try:
         await db.commit()
@@ -135,7 +141,7 @@ async def get_patient_detail(
 async def update_patient(
     patient_id: str,
     payload: PatientCreate,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_non_staff),
     db: AsyncSession = Depends(get_db),
 ):
     clinic_id = to_uuid(current_user.get("clinic_id"))
@@ -164,7 +170,7 @@ async def update_patient(
 @router.delete("/{patient_id}")
 async def delete_patient(
     patient_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_non_staff),
     db: AsyncSession = Depends(get_db),
 ):
     clinic_id = to_uuid(current_user.get("clinic_id"))

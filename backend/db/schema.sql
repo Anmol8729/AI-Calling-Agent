@@ -60,10 +60,16 @@ create table if not exists patients (
     gender          varchar(20),
     history         jsonb not null default '[]'::jsonb,
     follow_up_notes text,
+    -- "agent"  = created by the voice agent during a live call
+    -- "manual" = created by a logged-in user from the Contacts page
+    source          varchar(20)  not null default 'agent',
+    -- nullable: NULL for agent-created rows and rows predating this column
+    created_by      uuid references users(id) on delete set null,
     created_at      timestamp not null default (now() at time zone 'utc'),
     constraint uq_patient_clinic_phone unique (clinic_id, phone)
 );
 create index if not exists ix_patients_clinic_id on patients(clinic_id);
+create index if not exists ix_patients_created_by on patients(created_by);
 
 -- ===== appointments =====
 create table if not exists appointments (
