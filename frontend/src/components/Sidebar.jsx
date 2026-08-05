@@ -70,8 +70,10 @@ export default function Sidebar({ open, onClose }) {
     ? [...items, { label: "Admin", path: "/admin", icon: ShieldCheck }]
     : items;
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    // logout() now also revokes the session server-side, so it is async. Await it
+    // before closing the drawer; ProtectedRoute redirects once the store clears.
+    await logout();
     onClose?.();
   };
 
@@ -94,7 +96,7 @@ export default function Sidebar({ open, onClose }) {
               <Bot className="h-5 w-5" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-gray-950">VoxPilot AI</p>
+              <p className="text-sm font-semibold text-gray-950">Clarivo</p>
               <p className="text-xs text-gray-500">Inbound reception</p>
             </div>
           </div>

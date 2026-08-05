@@ -3,6 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { useAuthStore } from "../store/authStore";
 import { Bot, Loader2 } from "lucide-react";
 import { INDUSTRIES, DEFAULT_INDUSTRY } from "../lib/industries";
+import GoogleSignInButton from "../components/GoogleSignInButton";
 
 export default function Register() {
   const [name, setName] = useState("");
@@ -34,7 +35,7 @@ export default function Register() {
             Onboard your business
           </h2>
           <p className="mt-2 text-center text-sm text-gray-500">
-            Get started with your VoxPilot AI voice receptionist
+            Get started with your Clarivo voice receptionist
           </p>
         </div>
 
@@ -161,6 +162,11 @@ export default function Register() {
             </button>
           </div>
         </form>
+
+        {/* Same shared component as the login page. Signing up with Google creates
+            the account and its workspace, then lands on Setup to fill in the
+            business details this form would otherwise have collected. */}
+        <GoogleSignInButton label="Sign up with Google" />
 
         <p className="text-center text-sm text-gray-500">
           Already registered?{" "}

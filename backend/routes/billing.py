@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config.settings import settings
 from backend.services.db import get_db
+from backend.services import billing_period
 from backend.routes.auth import get_current_user
 from backend.services.plans import list_plans, get_plan, effective_call_limit, is_valid_plan
 from backend.services.email import send_email
@@ -48,8 +49,17 @@ router = APIRouter(prefix="/billing", tags=["Billing"])
 
 
 def _month_start() -> datetime:
-    now = datetime.utcnow()
-    return datetime(now.year, now.month, 1)
+    """Kept as a thin alias so existing call sites read unchanged.
+
+    The arithmetic moved to services/billing_period.py, which anchors the month to
+    the BILLING timezone rather than UTC. Anchoring to UTC meant that for the first
+    5h30m of every month, calls made that morning in India were billed to the month
+    that had already closed.
+    """
+    return billing_period.month_start_utc()
+
+
+
 
 
 async def _calls_this_month(db: AsyncSession, clinic_id) -> int:
@@ -102,7 +112,7 @@ async def billing_summary(
             "callsRemaining": remaining,
             "percentUsed": percent,
             "periodStart": _month_start().isoformat(),
-            "periodLabel": now.strftime("%B %Y"),
+            "periodLabel": billing_period.month_label(),
         },
         "paymentsEnabled": settings.payments_enabled,
     }
@@ -264,8 +274,22 @@ async def verify_payment(
         return api_response(success=True, message="Payment already confirmed", data={"plan": payment.plan_key})
 
     if not verify_payment_signature(body.razorpay_order_id, body.razorpay_payment_id, body.razorpay_signature):
-        payment.status = "failed"
-        await db.commit()
+        # Deliberately does NOT mark the payment failed. A bad signature only proves
+        # THIS request was not signed by Razorpay — it says nothing about the real
+        # payment, which may still be in progress. Writing "failed" here let anyone
+        # in the tenant who knew an order id force a pending order into a terminal
+        # state, and the genuine webhook would then find it already closed.
+        # The signed webhook is the authority on payment outcome.
+        logger.warning(
+            f"Rejected an unsigned verify for order {body.razorpay_order_id} "
+            f"(clinic {clinic_id}). Payment status left untouched at "
+            f"{payment.status!r} — only the signed webhook may change it."
+        )
+        await audit.record(
+            audit.BILLING_PAYMENT_FAILED, actor=current_user, clinic_id=clinic_id,
+            target_type="payment", target_id=payment.id, outcome="failure",
+            detail={"reason": "invalid_signature", "order_id": body.razorpay_order_id},
+        )
         return api_response(success=False, message="Payment verification failed", status_code=400)
 
     await _activate_paid_plan(db, payment, body.razorpay_payment_id)

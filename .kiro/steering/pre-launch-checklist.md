@@ -1,4 +1,14 @@
-# VoxPilot AI — Pre-Client-Launch Checklist
+# Clarivo — Pre-Client-Launch Checklist
+
+> **Security work has its own tracker: `docs/SECURITY-REMEDIATION.md`.**
+> Read it before touching auth, the agent's backend endpoints, or the websockets.
+> Closed and verified there (do NOT re-open): privilege escalation via signup ·
+> weak-password policy · XML injection on the inbound webhook · `.dockerignore`
+> secrets-in-image · security headers · `/health` · prod config fail-fast ·
+> **C2** agent per-call token scoping · **C3** session revocation ·
+> **C1** removal of the unauthenticated `/media-stream` pipeline.
+> Still open there: **C4** RBAC (waiting on the teammate's Staff Panel), **C5**
+> rotate `JWT_SECRET` (owner, doing last), **C6** Redis/compose, and H2-H12.
 
 Gate to run **before sending the product to any real client**. Everything below was
 established by testing against the live system, not assumed. Items marked ✅ are
@@ -90,14 +100,33 @@ business (check the agent log line `Call context: did=... clinic=... business=..
 
 ## GOTCHAS — hard-won, don't relearn these
 
-- **LLM choice matters.** Order in `agent/main.py` is Gemini → Groq → MiniMax.
+- **LLM choice matters.** The chain is a `FallbackAdapter` and its order is set by
+  `AGENT_LLM_ORDER` (default `gemini,groq,minimax`). `AGENT_LLM_PROVIDER` pins a single
+  provider with no failover, for A/B testing.
+  - **The Gemini key is FREE TIER: 5 requests/minute.** Error names it outright:
+    `generate_content_free_tier_requests, limit: 5, model: gemini-3.6-flash`. A call
+    uses 1–2 requests per turn, so it runs dry after ~3 turns and the caller hears
+    silence. Enable billing, or set `AGENT_LLM_ORDER=groq,gemini,minimax`.
+  - **Both `-latest` aliases share ONE project quota**, so two Gemini entries was fake
+    redundancy that also burned an `attempt_timeout` of silence. `GEMINI_FALLBACK_MODEL`
+    is empty by default now; only set it on a paid tier.
+  - **Groq needed a code fix to work as a fallback at all.** LiveKit copies Gemini's
+    `extra_content` (thought signatures) into the *shared* chat context and re-sends it to
+    every OpenAI-compatible provider; Groq rejects it with
+    `400 'messages.N' : property 'extra_content' is unsupported`. So Groq worked only
+    until the first assistant tool call, then failed every turn. `_StrictSchemaLLM` in
+    `agent/main.py` strips `.extra` on a copy (leaving Gemini's own signatures intact).
+    Groq is also the fastest option: ~0.5s to first token vs Gemini's 1.3–3s.
   - Groq free tier ≈ **12k tokens/min**; this agent sends ~3.3k per turn ⇒ 429s after
-    3–4 turns ⇒ the AI goes **silent mid-call**.
+    3–4 turns. `AGENT_PREEMPTIVE=0` halves per-turn requests and helps on any free tier.
   - Use a **`-latest`** Gemini alias. Pinned ids (`gemini-2.5-flash`, `-flash-lite`) return
-    **404 for new keys**, and `gemini-flash-lite-latest` was observed **hanging server-side**
-    (requests timing out) — which also silences the agent. `gemini-flash-latest` is reliable
-    (~1.3s to first token, correct tool-calling).
-  - MiniMax-Text-01 writes tool calls as text instead of calling them; MiniMax-M3 leaks `<think>`.
+    **404 for new keys**, and `gemini-flash-lite-latest` has been seen both hanging
+    server-side and returning `503 experiencing high demand`.
+  - MiniMax-Text-01 writes tool calls as text instead of calling them; MiniMax-M3 leaks
+    `<think>`. It stays LAST, but it stays *in* the chain — its quota is separate, so it is
+    the only thing left when Gemini and Groq are both rate-limited at once.
+  - **Only ONE agent worker should run.** Two registered workers make LiveKit split calls
+    between them at random, so half your test calls hit stale code.
 - **TTS loudness.** Gain is applied after synthesis via a **soft-knee limiter**. A plain
   multiply clipped the peaks and sounded "cut"/computerized. Tune `MINIMAX_TTS_GAIN`
   (2.0 default; ~3.0 louder, ~1.5 softer). Keep `MINIMAX_TTS_VOL=1.0` for headroom.
@@ -116,22 +145,26 @@ business (check the agent log line `Call context: did=... clinic=... business=..
 ## HOW TO RUN / VERIFY
 
 ```powershell
-# Backend (no --reload)
-.\.venv\Scripts\python.exe -m uvicorn backend.app:app --port 8000
+# Backend (no --reload). --host 0.0.0.0 is REQUIRED: ngrok resolves "localhost"
+# to IPv6 [::1], which uvicorn on 127.0.0.1 never answers -> calls go unreachable.
+.\.venv\Scripts\python.exe -m uvicorn backend.app:app --host 0.0.0.0 --port 8000
 
 # Voice agent (cwd = agent). Wrapper restarts it after the Windows teardown panic.
+# Run only ONE — two workers make LiveKit split calls between them.
 while ($true) { & '.venv\Scripts\python.exe' main.py dev; Start-Sleep -Seconds 2 }
 
 # Dashboard → http://127.0.0.1:3000  (NOT localhost)
-npm run dev
+npm run dev -- --host 127.0.0.1 --port 3000
 
-# ngrok, only for the Vobiz event webhook
-ngrok http 8000
+# ngrok — pin the IP for the same IPv6 reason. Static domain, so the URL is stable.
+ngrok http 127.0.0.1:8000
 ```
 
 Checks: `npm run build` + `npm run lint` (expect 0 / 0) ·
-`python -c "import backend.app"` · backend `GET /` should return 200 ·
-agent log should show `registered worker`.
+`python -c "import backend.app"` · `pytest backend/tests` (expect 11 passed) ·
+backend `GET /health` should return 200 with `"database": "ok"` (plain `GET /`
+never touches the DB, so it can look healthy while the DB is down) ·
+agent log should show `registered worker` with `agent_name: clarivo-inbound`.
 
 Restart the backend after backend changes and the agent after agent changes —
 neither hot-reloads. Delete any temporary `_*.py` diagnostic scripts afterwards.

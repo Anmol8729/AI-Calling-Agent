@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuthStore } from "../store/authStore";
 import { Bot, Loader2 } from "lucide-react";
+import GoogleSignInButton from "../components/GoogleSignInButton";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -93,6 +94,10 @@ export default function Login() {
             </button>
           </div>
         </form>
+
+        {/* Renders nothing when Supabase isn't configured, so this page is
+            unchanged for deployments without Google sign-in. */}
+        <GoogleSignInButton label="Continue with Google" />
 
         <p className="text-center text-sm text-gray-500">
           Don't have an account?{" "}

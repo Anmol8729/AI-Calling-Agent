@@ -1,28 +1,109 @@
+# Clarivo — container topology.
+#
+# What was wrong before (audit C6):
+#   * Redis published 6379 to the HOST with NO password. On any box with a public
+#     IP that is an open Redis — remote config rewrite and the classic ransomware
+#     vector. It only ever needed to be reachable by the API container.
+#   * `volumes: [".:/app"]` bind-mounted the whole repo over the image, which
+#     shipped the real .env into the running container and meant the code that
+#     actually ran was whatever happened to be on the host, not what was built
+#     and scanned. That is a dev-only pattern in a file used for deployment.
+#   * No healthchecks, so `depends_on` only waited for the process to exist, and
+#     an orchestrator had no way to tell a broken container from a starting one.
+#
+# Redis is included but currently UNUSED by the application (REDIS_URL is read in
+# settings.py and referenced nowhere else). It stays because the two open
+# scalability items need it — H4 moves rate limiting off in-memory storage, and H3
+# moves the notification event bus to pub/sub so more than one replica is safe.
+# Until then you can comment this service out entirely.
+
 services:
-  voice-agent:
+  api:
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      # Overrides whatever REDIS_URL is in .env: inside the compose network the
+      # host is the service name, and the password must be included.
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
     ports:
       - "8000:8000"
-    volumes:
-      - .:/app
+    # No source bind-mount. The image is the artefact; rebuild to deploy changes.
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # /health actually round-trips a DB query, unlike /, so a container that has
+      # lost its database reports unhealthy instead of quietly serving errors.
+      # Uses python because it is already in the image — no curl to install.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status == 200 else sys.exit(1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    security_opt:
+      # Blocks setuid binaries from gaining privileges inside the container.
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          # A runaway request or leak takes down this container, not the host.
+          memory: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # Database is hosted on Supabase (Postgres); no local DB container needed.
-  # Set DATABASE_URL in .env to your Supabase connection string.
+  # The database is hosted on Supabase (Postgres); no local DB container.
+  # Set DATABASE_URL in .env to the Supabase connection string.
 
   redis:
-    image: redis:7.0-alpine
+    image: redis:7.4-alpine
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    # Deliberately NO `ports:` — reachable only from other services on this
+    # network. Publishing it is what made it internet-facing before.
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+      - --appendonly
+      - "yes"
+      # Rename the commands that make an accidentally-exposed Redis dangerous.
+      - --rename-command
+      - FLUSHALL
+      - ""
+      - --rename-command
+      - FLUSHDB
+      - ""
+      - --rename-command
+      - CONFIG
+      - ""
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "sh", "-c", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    environment:
+      # For redis-cli inside the healthcheck only; not read by the server.
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   redis_data:

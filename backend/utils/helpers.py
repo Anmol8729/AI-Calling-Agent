@@ -54,13 +54,21 @@ def api_response(
     data: Optional[Any] = None,
     error: Optional[Any] = None,
     status_code: int = 200,
+    meta: Optional[dict] = None,
 ) -> JSONResponse:
-    return JSONResponse(
-        status_code=status_code,
-        content={
-            "success": success,
-            "message": message,
-            "data": data,
-            "error": error,
-        },
-    )
+    """Standard response envelope.
+
+    `meta` carries out-of-band information such as pagination state. It sits beside
+    `data` rather than inside it so a list endpoint can gain paging without changing
+    the shape of `data` and breaking existing dashboard code. Omitted entirely when
+    unused, so every other response is unchanged.
+    """
+    content = {
+        "success": success,
+        "message": message,
+        "data": data,
+        "error": error,
+    }
+    if meta is not None:
+        content["meta"] = meta
+    return JSONResponse(status_code=status_code, content=content)

@@ -1,10 +1,11 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,14 +20,30 @@ from backend.services.auth_service import (
     decode_access_token,
     generate_token,
     hash_token,
+    session_claims,
 )
+from backend.services import login_guard, audit
+from backend.services.supabase_auth import SupabaseAuthError, verify_google_token
 from backend.services.email import send_email
 from backend.services.industry_templates import get_template
 from backend.models import User, Tenant, PasswordResetToken, PhoneNumber
-from backend.schemas.auth import UserRegister, UserLogin
+from backend.schemas.auth import (
+    UserRegister,
+    UserLogin,
+    SELF_SIGNUP_ROLE,
+    MIN_PASSWORD_LENGTH,
+    validate_password_strength,
+)
 from backend.utils.helpers import api_response, serialize_model, to_uuid
 
 logger = logging.getLogger("auth-router")
+
+# Hashed once at import. Login runs a bcrypt comparison against this when the
+# email does not exist, so a request for an unknown address costs roughly the same
+# as one for a real account. Without it, response timing tells an attacker which
+# addresses are registered — cheap account enumeration despite the identical
+# error message.
+_DUMMY_PASSWORD_HASH = get_password_hash("clarivo-timing-equaliser-not-a-real-password")
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -45,6 +62,12 @@ async def get_current_user(
     if payload is None:
         raise credentials_exception
 
+    # A per-call agent token must never authenticate a dashboard user. Those are
+    # signed with a different key so they would fail anyway, but rejecting any
+    # scoped token here keeps the two trust domains explicitly separate.
+    if payload.get("scope"):
+        raise credentials_exception
+
     user_id = to_uuid(payload.get("sub"))
     if user_id is None:
         raise credentials_exception
@@ -54,7 +77,30 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
 
-    return serialize_model(user)
+    # Suspended accounts lose access on their NEXT request, not whenever their
+    # token happens to expire.
+    if not bool(getattr(user, "is_active", True)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account has been suspended. Please contact support.",
+        )
+
+    # Revocation check. Password change / reset / "log out everywhere" bump
+    # token_version, which instantly invalidates every token carrying the old
+    # value. Tokens minted before this column existed have no `ver` and are read
+    # as 0, matching the default, so nobody is logged out by the upgrade itself.
+    if int(payload.get("ver", 0) or 0) != int(getattr(user, "token_version", 0) or 0):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This session has ended. Please sign in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user_data = serialize_model(user)
+    # Never let the hash travel with the request-scoped user, so a future handler
+    # cannot leak it by returning `current_user` wholesale.
+    user_data.pop("password_hash", None)
+    return user_data
 
 
 def require_roles(allowed_roles: list):
@@ -75,11 +121,36 @@ def is_superadmin(email: str) -> bool:
 
 
 async def require_superadmin(current_user: dict = Depends(get_current_user)):
-    """Dependency that restricts a route to platform super-admins."""
+    """Dependency that restricts a route to platform super-admins.
+
+    Super-admin is granted by the SUPERADMIN_EMAILS allowlist, which on its own
+    proves nothing: before email verification existed, whoever registered an
+    allowlisted address FIRST became platform admin — full access to every tenant,
+    no mailbox check. So a verified address is also required.
+
+    Only enforced when email delivery is actually configured. With SMTP absent
+    verification cannot be completed normally, and refusing then would lock the
+    owner out of their own admin panel. `check_production_config` treats missing
+    SMTP as a production blocker, so this cannot stay unenforced in production.
+    """
     if not is_superadmin(current_user.get("email", "")):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Super admin access required",
+        )
+    if settings.SMTP_HOST and not current_user.get("email_verified_at"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Verify your email address before using platform admin. "
+                "Check your inbox, or request a new link from /api/auth/resend-verification."
+            ),
+        )
+    if not settings.SMTP_HOST:
+        logger.warning(
+            f"Super-admin access granted to {current_user.get('email')} WITHOUT an "
+            "email-verification check, because SMTP_HOST is not configured. Configure "
+            "SMTP before going live — the allowlist alone proves nothing."
         )
     return current_user
 
@@ -92,9 +163,16 @@ async def register(request: Request, payload: UserRegister, db: AsyncSession = D
     if existing.scalar_one_or_none():
         return api_response(success=False, message="Email already registered", status_code=400)
 
+    # Defence in depth: the role is decided HERE, never taken from the request.
+    # The schema already restricts the field, but this guarantees that even a
+    # future schema change cannot turn public signup into a way to mint a
+    # privileged account. Staff/admin accounts are created by an authenticated
+    # owner, not by self-signup.
+    role = SELF_SIGNUP_ROLE
+
     # Create Tenant (the client's business) first, when applicable.
     clinic_id = None
-    if payload.role == "doctor" or payload.clinic_name:
+    if payload.clinic_name or role == SELF_SIGNUP_ROLE:
         clinic_name = payload.clinic_name or f"{payload.name}'s Business"
         did_val = payload.did.strip() if payload.did else None
         # Seed the agent with a vertical-specific starter prompt/greeting from
@@ -130,7 +208,7 @@ async def register(request: Request, payload: UserRegister, db: AsyncSession = D
         email=payload.email,
         password_hash=get_password_hash(payload.password),
         name=payload.name,
-        role=payload.role,
+        role=role,
         clinic_id=clinic_id,
     )
     db.add(user)
@@ -143,20 +221,303 @@ async def register(request: Request, payload: UserRegister, db: AsyncSession = D
     user_id = str(user.id)
     clinic_id_str = str(clinic_id) if clinic_id else None
 
-    token_data = {"sub": user_id, "role": payload.role, "clinic_id": clinic_id_str}
-    access_token = create_access_token(token_data)
+    access_token = create_access_token(session_claims(user, clinic_id_str))
 
     response_data = {
         "access_token": access_token,
         "token_type": "bearer",
         "id": user_id,
         "email": payload.email,
-        "role": payload.role,
+        "role": role,
         "name": payload.name,
         "clinic_id": clinic_id_str,
         "is_superadmin": is_superadmin(payload.email),
+        # Always False right after signup — the confirmation email has only just
+        # been sent. The dashboard uses this to show a "confirm your email" prompt.
+        "email_verified": False,
     }
+    await audit.record(
+        audit.AUTH_REGISTER, actor_email=payload.email, clinic_id=clinic_id,
+        target_type="user", target_id=user_id,
+        detail={"role": role, "clinic_created": bool(clinic_id)},
+        request=request,
+    )
+    # Send the verification link. Login is deliberately NOT blocked on it: with SMTP
+    # unconfigured nobody could ever get in, and locking users out of a product they
+    # just signed up for is worse than an unverified address. Verification does gate
+    # platform admin (see require_superadmin), and the dashboard can nudge using the
+    # `email_verified` flag in this response.
+    await _send_verification_email(db, user)
     return api_response(success=True, message="Registration successful", data=response_data)
+
+
+async def _send_verification_email(db: AsyncSession, user) -> None:
+    """Issue a single-use verification token and email the link. Best-effort."""
+    try:
+        # Invalidate any earlier unused verification token so only the newest link
+        # works — otherwise an old email remains a valid way in.
+        previous = (await db.execute(
+            select(PasswordResetToken).where(
+                PasswordResetToken.user_id == user.id,
+                PasswordResetToken.purpose == "verify",
+                PasswordResetToken.used_at.is_(None),
+            )
+        )).scalars().all()
+        for row in previous:
+            row.used_at = datetime.utcnow()
+
+        raw = generate_token()
+        db.add(PasswordResetToken(
+            user_id=user.id,
+            token_hash=hash_token(raw),
+            purpose="verify",
+            expires_at=datetime.utcnow() + timedelta(hours=24),
+        ))
+        await db.commit()
+        link = f"{settings.APP_BASE_URL}/verify-email?token={raw}"
+        await asyncio.to_thread(
+            send_email,
+            user.email,
+            "Confirm your Clarivo email address",
+            f"Confirm your email address to finish setting up Clarivo (link valid for 24 hours):\n\n{link}\n\n"
+            "If you didn't create this account, you can ignore this email.",
+        )
+    except Exception as e:  # noqa: BLE001 — must never fail the signup itself
+        logger.error(f"Could not send verification email to {user.email}: {e}")
+
+
+class GoogleSignIn(BaseModel):
+    # The Supabase access token the browser receives after completing Google
+    # sign-in. Verified server-side; nothing in it is trusted before that.
+    access_token: str = Field(..., max_length=4096)
+    # Optional, and only used when this sign-in creates a brand new account.
+    clinic_name: Optional[str] = Field(default=None, max_length=255)
+    industry: Optional[str] = Field(default=None, max_length=50)
+
+
+@router.post("/oauth/google")
+@limiter.limit("10/minute")
+async def google_sign_in(
+    request: Request,
+    payload: GoogleSignIn,
+    db: AsyncSession = Depends(get_db),
+):
+    """Exchange a verified Google identity for one of THIS app's session tokens.
+
+    Supabase Auth is used only to establish who the person is. It does not become
+    the session: the response is the same token the password login returns, so every
+    existing control keeps working unchanged — `clinic_id` tenant scoping, roles,
+    `token_version` revocation, `is_active` suspension, and the audit trail.
+
+    Three cases:
+      * known account with this Google identity  -> sign in, refresh the profile
+      * known account with the same EMAIL        -> link the Google identity to it
+      * unknown email                            -> create the account and its tenant
+
+    Linking on a matching email is safe here because `verify_google_token` has
+    already required that Google confirmed the address. Without that requirement this
+    would be an account-takeover path.
+    """
+    if not settings.google_oauth_enabled:
+        return api_response(
+            success=False,
+            message="Google sign-in is not enabled on this server.",
+            status_code=503,
+        )
+
+    try:
+        identity = await verify_google_token(payload.access_token)
+    except SupabaseAuthError as e:
+        await audit.record(
+            "auth.google_signin_failed", outcome="failure",
+            detail={"reason": str(e)}, request=request,
+        )
+        return api_response(success=False, message=str(e), status_code=401)
+
+    # Match on the provider id first: it is stable even if the person changes their
+    # Google email address.
+    user = (await db.execute(
+        select(User).where(User.supabase_user_id == identity.supabase_user_id)
+    )).scalar_one_or_none()
+    linked_existing = False
+
+    if user is None:
+        user = (await db.execute(
+            select(User).where(User.email == identity.email)
+        )).scalar_one_or_none()
+        if user is not None:
+            # Same person, signing in a new way. Attach the identity rather than
+            # creating a second account for the same address.
+            user.supabase_user_id = identity.supabase_user_id
+            linked_existing = True
+
+    created = False
+    if user is None:
+        # New account. Mirrors /register: a tenant is created so the person lands in
+        # their own workspace, seeded from the industry template.
+        created = True
+        clinic_name = (payload.clinic_name or "").strip() or (
+            f"{identity.full_name or identity.email.split('@')[0]}'s Business"
+        )
+        tmpl = get_template(payload.industry)
+        tenant = Tenant(
+            name=clinic_name,
+            subscription="free",
+            industry=(payload.industry.strip().lower() if tmpl else None),
+            system_prompt=(tmpl["system_prompt"] if tmpl else None),
+            initial_greeting=(tmpl["initial_greeting"] if tmpl else None),
+        )
+        db.add(tenant)
+        await db.flush()
+
+        user = User(
+            email=identity.email,
+            # No password at all — see the note on the column. The account can only
+            # be signed into with Google until the person sets one.
+            password_hash=None,
+            name=identity.full_name or identity.email.split("@")[0],
+            # Same role every public sign-up gets. Never taken from the request.
+            role=SELF_SIGNUP_ROLE,
+            clinic_id=tenant.id,
+            supabase_user_id=identity.supabase_user_id,
+            # Set EXPLICITLY, not left to the column default. A model default is
+            # applied when the row is INSERTed, so on a freshly constructed object
+            # these are still None — and the suspension check below then read
+            # `is_active = None` as "suspended" and refused every brand new account.
+            is_active=True,
+            token_version=0,
+            failed_login_attempts=0,
+        )
+        db.add(user)
+        # Assigns the id and applies any remaining defaults before the checks below.
+        await db.flush()
+
+    # Only an explicit False means suspended. `is not False` rather than a falsy
+    # test on purpose: None here means "not yet persisted", not "disabled".
+    if getattr(user, "is_active", True) is False:
+        # A suspended account must not be able to walk back in through a second door.
+        await audit.record(
+            "auth.google_signin_failed", actor_email=user.email,
+            clinic_id=user.clinic_id, outcome="failure",
+            detail={"reason": "account_suspended"}, request=request,
+        )
+        return api_response(
+            success=False,
+            message="This account has been suspended. Please contact support.",
+            status_code=403,
+        )
+
+    # Profile sync, on every sign-in: name and avatar can change on Google's side.
+    # An existing name is not overwritten with a blank one.
+    if identity.full_name:
+        user.name = identity.full_name
+    if identity.avatar_url:
+        user.avatar_url = identity.avatar_url
+    # Google has already confirmed the address, so asking for our own proof would be
+    # asking for something we already have.
+    if user.email_verified_at is None:
+        user.email_verified_at = datetime.utcnow()
+    user.updated_at = datetime.utcnow()
+    # Clears any brute-force lockout: proving control of the Google account is
+    # stronger evidence than the lockout is protection.
+    login_guard.register_success(user)
+
+    await db.commit()
+    await db.refresh(user)
+
+    clinic_id_str = str(user.clinic_id) if user.clinic_id else None
+    access_token = create_access_token(session_claims(user, clinic_id_str))
+
+    await audit.record(
+        audit.AUTH_LOGIN, actor_email=user.email, clinic_id=user.clinic_id,
+        target_type="user", target_id=user.id,
+        detail={"provider": "google", "account_created": created,
+                "identity_linked": linked_existing},
+        request=request,
+    )
+
+    return api_response(
+        success=True,
+        message="Signed in with Google",
+        data={
+            "access_token": access_token,
+            "token_type": "bearer",
+            "id": str(user.id),
+            "email": user.email,
+            "role": user.role,
+            "name": user.name,
+            "avatar_url": user.avatar_url,
+            "clinic_id": clinic_id_str,
+            "is_superadmin": is_superadmin(user.email),
+            "email_verified": user.email_verified_at is not None,
+            # Lets the dashboard send a first-time user through onboarding.
+            "is_new_account": created,
+        },
+    )
+
+
+class VerifyEmail(BaseModel):
+    token: str = Field(..., max_length=256)
+
+
+@router.post("/verify-email")
+@limiter.limit("10/minute")
+async def verify_email(request: Request, payload: VerifyEmail, db: AsyncSession = Depends(get_db)):
+    """Confirm ownership of an email address using the emailed token."""
+    row = (await db.execute(
+        select(PasswordResetToken).where(
+            PasswordResetToken.token_hash == hash_token(payload.token),
+            PasswordResetToken.purpose == "verify",
+        )
+    )).scalar_one_or_none()
+    if not row or row.used_at is not None or row.expires_at < datetime.utcnow():
+        return api_response(
+            success=False,
+            message="That confirmation link is invalid or has expired. Request a new one.",
+            status_code=400,
+        )
+
+    user = (await db.execute(select(User).where(User.id == row.user_id))).scalar_one_or_none()
+    if not user:
+        return api_response(success=False, message="Account not found", status_code=404)
+
+    if user.email_verified_at is None:
+        user.email_verified_at = datetime.utcnow()
+    row.used_at = datetime.utcnow()
+    await db.commit()
+
+    await audit.record(
+        "auth.email_verified", actor_email=user.email, clinic_id=user.clinic_id,
+        target_type="user", target_id=user.id, request=request,
+    )
+    return api_response(success=True, message="Email address confirmed.")
+
+
+@router.post("/resend-verification")
+@limiter.limit("3/minute")
+async def resend_verification(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a fresh verification link to the signed-in user's address.
+
+    Requires a session, so it cannot be used to spam an arbitrary mailbox. Rate
+    limited more tightly than the rest for the same reason.
+    """
+    user = (await db.execute(
+        select(User).where(User.id == to_uuid(current_user["id"]))
+    )).scalar_one_or_none()
+    if not user:
+        return api_response(success=False, message="Account not found", status_code=404)
+    if user.email_verified_at is not None:
+        return api_response(success=True, message="Your email address is already confirmed.")
+
+    await _send_verification_email(db, user)
+    return api_response(
+        success=True,
+        message="Confirmation email sent. Check your inbox.",
+    )
 
 
 @router.post("/login")
@@ -164,15 +525,102 @@ async def register(request: Request, payload: UserRegister, db: AsyncSession = D
 async def login(request: Request, payload: UserLogin, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
-    if not user:
-        return api_response(success=False, message="Invalid email or password", status_code=400)
 
-    if not verify_password(payload.password, user.password_hash):
-        return api_response(success=False, message="Invalid email or password", status_code=400)
+    # Identical wording for every rejection below. Anything more specific turns
+    # this endpoint into an oracle for which addresses are registered.
+    invalid = api_response(success=False, message="Invalid email or password", status_code=400)
+
+    if not user:
+        # Spend a comparable amount of time on a non-existent account so response
+        # timing does not reveal whether the address is registered.
+        verify_password(payload.password, _DUMMY_PASSWORD_HASH)
+        await audit.record(
+            audit.AUTH_LOGIN_FAILED, actor_email=payload.email, outcome="failure",
+            detail={"reason": "unknown_email"}, request=request,
+        )
+        return invalid
+
+    if not user.password_hash:
+        # Created through Google, so there is no password to check. Still spend the
+        # bcrypt time, otherwise a fast rejection here reveals which accounts are
+        # Google-only. The message names Google because a generic "invalid password"
+        # would leave the person retrying a password they never set.
+        verify_password(payload.password, _DUMMY_PASSWORD_HASH)
+        await audit.record(
+            audit.AUTH_LOGIN_FAILED, actor_email=user.email, clinic_id=user.clinic_id,
+            outcome="failure", detail={"reason": "password_login_on_google_account"},
+            request=request,
+        )
+        return api_response(
+            success=False,
+            message=(
+                "This account uses Google sign-in. Use \"Continue with Google\", or "
+                "set a password first with \"Forgot password\"."
+            ),
+            status_code=400,
+        )
+
+    # Verify the password even when the account is locked, so a locked account and
+    # a wrong password cost about the same. Returning early here would leak lock
+    # state through response timing.
+    password_ok = verify_password(payload.password, user.password_hash)
+
+    if login_guard.is_locked(user):
+        mins = login_guard.lock_remaining_minutes(user)
+        logger.warning(f"Rejected login for locked account {user.email} ({mins}m remaining).")
+        await audit.record(
+            audit.AUTH_LOGIN_FAILED, actor_email=user.email, clinic_id=user.clinic_id,
+            outcome="failure", detail={"reason": "account_locked", "minutes_remaining": mins},
+            request=request,
+        )
+        return api_response(
+            success=False,
+            message=(
+                "Too many failed sign-in attempts. This account is temporarily "
+                f"locked — try again in about {mins} minute(s), or reset your password."
+            ),
+            status_code=429,
+        )
+
+    if not password_ok:
+        # Per-ACCOUNT lockout. The IP rate limit above is flood protection only; it
+        # does nothing against credential stuffing from a pool of addresses.
+        locked = login_guard.register_failure(user)
+        await db.commit()
+        await audit.record(
+            audit.AUTH_LOCKED if locked else audit.AUTH_LOGIN_FAILED,
+            actor_email=user.email, clinic_id=user.clinic_id, outcome="failure",
+            detail={"reason": "wrong_password",
+                    "failed_attempts": int(user.failed_login_attempts or 0)},
+            request=request,
+        )
+        if locked:
+            return api_response(
+                success=False,
+                message=(
+                    "Too many failed sign-in attempts. This account has been "
+                    f"temporarily locked for {login_guard.lock_remaining_minutes(user)} "
+                    "minute(s). You can reset your password to regain access sooner."
+                ),
+                status_code=429,
+            )
+        return invalid
+
+    if not bool(getattr(user, "is_active", True)):
+        # Same generic wording as a bad password: whether an account exists and
+        # whether it is suspended are both details worth not confirming.
+        return invalid
+
+    # Genuine sign-in: clear the failure counter and stamp the login time.
+    login_guard.register_success(user)
+    await db.commit()
+    await audit.record(
+        audit.AUTH_LOGIN, actor_email=user.email, clinic_id=user.clinic_id,
+        target_type="user", target_id=user.id, request=request,
+    )
 
     clinic_id_str = str(user.clinic_id) if user.clinic_id else None
-    token_data = {"sub": str(user.id), "role": user.role, "clinic_id": clinic_id_str}
-    access_token = create_access_token(token_data)
+    access_token = create_access_token(session_claims(user, clinic_id_str))
 
     response_data = {
         "access_token": access_token,
@@ -183,6 +631,7 @@ async def login(request: Request, payload: UserLogin, db: AsyncSession = Depends
         "name": user.name,
         "clinic_id": clinic_id_str,
         "is_superadmin": is_superadmin(user.email),
+        "email_verified": user.email_verified_at is not None,
     }
     return api_response(success=True, message="Login successful", data=response_data)
 
@@ -196,13 +645,21 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         "role": current_user["role"],
         "clinic_id": current_user.get("clinic_id"),
         "is_superadmin": is_superadmin(current_user["email"]),
+        # Lets the dashboard prompt for confirmation. Login is not blocked on it,
+        # but platform admin is (see require_superadmin).
+        "email_verified": current_user.get("email_verified_at") is not None,
     }
     return api_response(success=True, message="Current user fetched successfully", data=user_response)
 
 
 class ChangePassword(BaseModel):
-    current_password: str
-    new_password: str = Field(..., min_length=6)
+    current_password: str = Field(..., max_length=128)
+    new_password: str = Field(..., min_length=MIN_PASSWORD_LENGTH, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def _strength(cls, v: str) -> str:
+        return validate_password_strength(v)
 
 
 class ProfileUpdate(BaseModel):
@@ -214,8 +671,13 @@ class ForgotPassword(BaseModel):
 
 
 class ResetPassword(BaseModel):
-    token: str
-    new_password: str = Field(..., min_length=6)
+    token: str = Field(..., max_length=256)
+    new_password: str = Field(..., min_length=MIN_PASSWORD_LENGTH, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def _strength(cls, v: str) -> str:
+        return validate_password_strength(v)
 
 
 @router.put("/profile")
@@ -244,8 +706,24 @@ async def change_password(
     if not verify_password(payload.current_password, user.password_hash):
         return api_response(success=False, message="Current password is incorrect", status_code=400)
     user.password_hash = get_password_hash(payload.new_password)
+    # Changing a password must end every OTHER session — that is the whole point
+    # when someone changes it because they think an account is compromised.
+    # Bumping the version invalidates this browser's token too, so we hand back a
+    # freshly minted one and the user stays signed in here.
+    user.token_version = int(getattr(user, "token_version", 0) or 0) + 1
+    user.password_changed_at = datetime.utcnow()
     await db.commit()
-    return api_response(success=True, message="Password changed successfully")
+    await db.refresh(user)
+    await audit.record(
+        audit.AUTH_PASSWORD_CHANGED, actor=current_user,
+        target_type="user", target_id=user.id,
+        detail={"other_sessions_revoked": True},
+    )
+    return api_response(
+        success=True,
+        message="Password changed. You have been signed out on all other devices.",
+        data={"access_token": create_access_token(session_claims(user)), "token_type": "bearer"},
+    )
 
 
 @router.post("/forgot-password")
@@ -265,7 +743,7 @@ async def forgot_password(request: Request, payload: ForgotPassword, db: AsyncSe
         await asyncio.to_thread(
             send_email,
             user.email,
-            "Reset your VoxPilot password",
+            "Reset your Clarivo password",
             f"Use this link to reset your password (valid for 1 hour):\n\n{link}\n\n"
             "If you didn't request this, you can safely ignore this email.",
         )
@@ -286,6 +764,62 @@ async def reset_password(request: Request, payload: ResetPassword, db: AsyncSess
     if not user:
         return api_response(success=False, message="This link is invalid or has expired.", status_code=400)
     user.password_hash = get_password_hash(payload.new_password)
+    # A reset is the recovery path for a compromised account, so every existing
+    # session must die — otherwise an attacker holding a stolen token keeps access
+    # even after the legitimate owner resets the password.
+    user.token_version = int(getattr(user, "token_version", 0) or 0) + 1
+    user.password_changed_at = datetime.utcnow()
+    # Clear any brute-force lockout. Proving control of the mailbox is stronger
+    # evidence than the lockout is protection, and the lockout message tells users
+    # to reset their password to get back in — so it has to actually work.
+    user.failed_login_attempts = 0
+    user.locked_until = None
     row.used_at = datetime.utcnow()
+
+    # Burn any other unused reset tokens for this user, so an older emailed link
+    # cannot be replayed to take the account over again.
+    others = (await db.execute(
+        select(PasswordResetToken).where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+        )
+    )).scalars().all()
+    for t in others:
+        t.used_at = datetime.utcnow()
+
     await db.commit()
+    await audit.record(
+        audit.AUTH_PASSWORD_RESET, actor_email=user.email, clinic_id=user.clinic_id,
+        target_type="user", target_id=user.id,
+        detail={"all_sessions_revoked": True, "lockout_cleared": True},
+        request=request,
+    )
     return api_response(success=True, message="Password set successfully. You can now sign in.")
+
+
+@router.post("/logout-all-devices")
+async def logout_all_devices(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """End every session for this account, including this one.
+
+    Real server-side logout. Previously "logout" only cleared localStorage, so a
+    token copied off the machine stayed valid for its full 7-day lifetime with no
+    way to stop it.
+    """
+    user = (await db.execute(
+        select(User).where(User.id == to_uuid(current_user["id"]))
+    )).scalar_one_or_none()
+    if not user:
+        return api_response(success=False, message="User not found", status_code=404)
+    user.token_version = int(getattr(user, "token_version", 0) or 0) + 1
+    await db.commit()
+    logger.info(f"User {user.email} revoked all sessions.")
+    await audit.record(
+        audit.AUTH_LOGOUT_ALL, actor=current_user, target_type="user", target_id=user.id,
+    )
+    return api_response(
+        success=True,
+        message="Signed out on all devices. Please sign in again.",
+    )

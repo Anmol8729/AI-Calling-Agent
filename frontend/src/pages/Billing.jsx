@@ -91,7 +91,7 @@ export default function Billing() {
         order_id: d.orderId,
         amount: d.amount,
         currency: d.currency,
-        name: "VoxPilot AI",
+        name: "Clarivo",
         description: `${d.planName} plan`,
         prefill: { name: d.businessName, email: d.email },
         theme: { color: "#111827" },

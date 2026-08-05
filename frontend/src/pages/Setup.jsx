@@ -192,7 +192,7 @@ export default function Setup() {
 
       {/* Business details */}
       <Section icon={Building2} title="Business details">
-        <Field label="Business name" value={name} onChange={setName} placeholder="Apex Dental Care" />
+        <Field label="Business name" value={name} onChange={setName} placeholder="Your business name" />
         <Field label="Booking alert email" value={notifyEmail} onChange={setNotifyEmail} placeholder="you@business.com" hint="Where we email you when the assistant books someone. Blank uses your account email." />
       </Section>
 
@@ -207,7 +207,7 @@ export default function Setup() {
           <option value="time">Time slots — fixed appointment times</option>
           <option value="token">Token queue — daily number, no fixed time</option>
         </select>
-        <Hint>Token queue suits clinics that see patients by a daily number (e.g. "aap ka number 15 hai") instead of exact times. Your Appointments page and the AI receptionist adapt automatically.</Hint>
+        <Hint>Token queue suits businesses that serve people by a daily number instead of exact times — callers are told their token number. Your Appointments page and the assistant adapt automatically.</Hint>
       </Section>
 
       {/* Language */}
@@ -243,10 +243,10 @@ export default function Setup() {
             className="mt-2 w-full max-w-sm rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
             value={voice}
             onChange={(e) => setVoice(e.target.value)}
-            placeholder="Paste your MiniMax cloned voice_id"
+            placeholder="Paste your cloned voice ID"
           />
         )}
-        <Hint>Pick a built-in voice, or choose "Custom / cloned voice" and paste a MiniMax cloned voice_id.</Hint>
+        <Hint>Pick a built-in voice, or use a custom cloned voice. Contact us to have a voice cloned for your business.</Hint>
       </Section>
 
       {/* Knowledge base */}
@@ -376,7 +376,7 @@ function PhoneNumbersSection() {
       if (res.data?.success) {
         setOpen(false);
         setForm({ number: "", label: "" });
-        setBanner({ type: "success", text: "Number connected. Point its provider webhook at your VoxPilot inbound URL to receive calls." });
+        setBanner({ type: "success", text: "Number connected. Point its provider webhook at your Clarivo inbound URL to receive calls." });
         load();
       } else {
         setFormError(res.data?.message || "Could not connect the number.");
@@ -493,7 +493,29 @@ function PhoneNumbersSection() {
         </div>
       )}
 
-      <DataTable columns={columns} rows={numbers} loading={loading} emptyTitle="No numbers connected yet" />
+      <DataTable
+        columns={columns}
+        rows={numbers}
+        loading={loading}
+        emptyTitle="No numbers connected yet"
+        emptyDescription={
+          provisionInfo.enabled
+            ? "Your assistant needs a phone number to answer calls. Get one in a click, or connect a number you already own."
+            : "Your assistant needs a phone number to answer calls. Connect a number you own with your telephony provider."
+        }
+        emptyIcon={PhoneCall}
+        emptyAction={
+          provisionInfo.enabled ? (
+            <Button onClick={getNumber} disabled={provisioning}>
+              {provisioning ? "Setting up..." : "Get a number"}
+            </Button>
+          ) : (
+            <Button onClick={openConnect}>
+              <Plus className="h-4 w-4" /> Connect number
+            </Button>
+          )
+        }
+      />
 
       <Modal
         open={open}
@@ -509,12 +531,13 @@ function PhoneNumbersSection() {
       >
         {formError && <div className="mb-4 rounded-2xl border border-red-100 bg-red-50 p-3 text-sm text-red-800">{formError}</div>}
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Phone number" value={form.number} onChange={(v) => setForm((f) => ({ ...f, number: v }))} placeholder="+14155550100" />
+          <Field label="Phone number" value={form.number} onChange={(v) => setForm((f) => ({ ...f, number: v }))} placeholder="+919812345678" />
           <Field label="Label" value={form.label} onChange={(v) => setForm((f) => ({ ...f, label: v }))} placeholder="Main line" />
         </div>
         <p className="mt-4 flex items-start gap-2 text-xs text-gray-400">
           <PhoneCall className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          After connecting, set this number's answer webhook (at your provider) to your VoxPilot inbound URL.
+          Use this if you already own a number with a telephony provider. We'll email you the details needed to
+          point it at your assistant — or use "Get a number" for instant setup.
         </p>
       </Modal>
     </Section>

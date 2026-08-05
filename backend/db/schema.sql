@@ -1,4 +1,4 @@
--- VoxPilot AI — Supabase Postgres schema
+-- Clarivo — Supabase Postgres schema
 --
 -- This file is OPTIONAL. The backend calls SQLAlchemy's create_all() on startup,
 -- which creates any missing tables automatically. Use this script if you prefer

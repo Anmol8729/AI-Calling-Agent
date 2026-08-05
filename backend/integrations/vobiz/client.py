@@ -1,6 +1,9 @@
 import logging
-import httpx
+from html import escape
 from typing import Optional
+
+import httpx
+
 from backend.config.settings import settings
 
 logger = logging.getLogger("vobiz-client")
@@ -49,13 +52,21 @@ class VobizClient:
 
     @staticmethod
     def get_stream_xml(ws_url: str) -> str:
-        """
-        Generate Vobiz XML to redirect call media to our WebSocket server.
+        """Generate Vobiz XML that redirects call media to our WebSocket server.
+
+        `ws_url` embeds the dialed/caller numbers, which arrive from the PUBLIC,
+        unauthenticated /api/calls/twiml/inbound webhook. Interpolating them raw
+        allowed XML injection: a request with
+            to=</Stream><Say>..</Say><Dial>+91..</Dial><Stream>
+        produced a response containing those verbs as real markup, letting an
+        unauthenticated caller inject <Dial> (toll fraud) or <Say> into the
+        call plan. An unescaped bare `&` also made the document malformed.
+        Escaping the value fixes both.
         """
         return f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-l16;rate=8000">
-        {ws_url}
+        {escape(ws_url, quote=False)}
     </Stream>
 </Response>
 """

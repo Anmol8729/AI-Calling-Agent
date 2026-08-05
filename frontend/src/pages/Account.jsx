@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Save, KeyRound, UserCog } from "lucide-react";
 import api from "../lib/api";
 import { Button } from "../components/ui/Button";
+import { useAuthStore } from "../store/authStore";
 
 function extractError(err) {
   const d = err?.response?.data;
@@ -24,6 +25,8 @@ function Banner({ msg }) {
 }
 
 export default function Account() {
+  // Adopt the replacement token the server issues after a password change.
+  const setToken = useAuthStore((state) => state.setToken);
   const [profile, setProfile] = useState({ email: "", role: "" });
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(true);
@@ -82,7 +85,15 @@ export default function Account() {
     try {
       const res = await api.post("/auth/change-password", { current_password: currentPassword, new_password: newPassword });
       if (res.data?.success) {
-        setPwdMsg({ type: "success", text: "Password changed successfully." });
+        // Changing the password revokes every existing session server-side,
+        // including this tab's. The response carries a freshly issued token, so
+        // store it — without this the next request 401s and bounces to /login.
+        const fresh = res.data?.data?.access_token;
+        if (fresh) setToken(fresh);
+        setPwdMsg({
+          type: "success",
+          text: "Password changed. You've been signed out on all other devices.",
+        });
         setCurrentPassword("");
         setNewPassword("");
         setConfirmPassword("");

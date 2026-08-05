@@ -7,8 +7,12 @@ it sent. Runs as an asyncio task started in the app lifespan (no external
 scheduler/Celery). No-op while WhatsApp is unconfigured.
 
 Note: `appointment_at` is naive local wall-time, so we compare against
-datetime.now() (server local). If you run multiple app workers, a rare duplicate
-reminder is possible; a single worker (typical for the WebSocket app) is safe.
+datetime.now() (server local).
+
+Multiple replicas are now safe: the loop runs under a Postgres advisory lock so
+exactly one process sends. Without it, two replicas would both see the same
+appointment with `reminder_sent = False` and both send — the customer receives the
+reminder twice, because the flag is only written after sending.
 """
 
 import asyncio
@@ -18,6 +22,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 
 from backend.services.db import get_sessionmaker
+from backend.services.job_lock import run_as_single_owner
 from backend.services.whatsapp import send_appointment_reminder, resolve_config
 from backend.services import repository
 from backend.config.settings import settings
@@ -67,16 +72,19 @@ async def _run_once():
 
 
 async def reminder_loop():
-    """Run reminder checks on an interval until cancelled (app shutdown)."""
+    """Run reminder checks on an interval, on exactly ONE process.
+
+    Every replica starts this loop, but a Postgres advisory lock means only one of
+    them sends. This is not an optimisation: two replicas would both read the same
+    appointment with `reminder_sent = False` and both send, so the customer gets the
+    same WhatsApp message twice. The flag is only written after sending, so nothing
+    else prevents it.
+
+    If the owning process dies, its session ends, Postgres releases the lock, and
+    another replica takes over on its next check.
+    """
     interval = max(int(settings.WHATSAPP_REMINDER_INTERVAL_SEC or 300), 30)
     logger.info(
-        f"Reminder worker started (interval={interval}s, lead={settings.WHATSAPP_REMINDER_LEAD_MIN}min)."
+        f"Reminder worker starting (interval={interval}s, lead={settings.WHATSAPP_REMINDER_LEAD_MIN}min)."
     )
-    while True:
-        try:
-            await _run_once()
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            logger.error(f"Reminder loop iteration error: {e}")
-        await asyncio.sleep(interval)
+    await run_as_single_owner("whatsapp_reminders", _run_once, interval=interval)

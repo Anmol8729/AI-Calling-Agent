@@ -11,7 +11,7 @@ previous `if db is not None` guards.
 import logging
 from datetime import datetime
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -95,11 +95,18 @@ async def log_whatsapp_message(clinic_id, to_phone, kind, template, body, status
 
 
 async def is_over_monthly_quota(clinic_id, limit) -> bool:
-    """True if the tenant has reached/exceeded `limit` calls this calendar month.
+    """True if the tenant has reached/exceeded `limit` calls this billing month.
 
-    Used by the websocket handler for opt-in quota enforcement. Fail-open: returns
-    False when unconfigured, when there's no positive limit, or on any error, so a
-    check problem never blocks a legitimate call.
+    Fail-open: returns False when unconfigured, when there's no positive limit, or on
+    any error, so a problem with the CHECK never blocks a legitimate call. Rejecting
+    a paying customer's caller because a count failed is worse than allowing one call
+    over the limit.
+
+    The month boundary comes from services/billing_period, which anchors to the
+    billing timezone. Anchoring to UTC (as this did) meant that during the first
+    5h30m of a month, calls made that morning in India were counted against the
+    PREVIOUS month's quota — so a customer could be refused a call they were
+    entitled to.
     """
     if not limit or limit <= 0:
         return False
@@ -107,9 +114,8 @@ async def is_over_monthly_quota(clinic_id, limit) -> bool:
     cid = to_uuid(clinic_id)
     if Session is None or cid is None:
         return False
-    from datetime import datetime
-    now = datetime.utcnow()
-    month_start = datetime(now.year, now.month, 1)
+    from backend.services import billing_period
+    month_start = billing_period.month_start_utc()
     async with Session() as session:
         used = (await session.execute(
             select(func.count()).select_from(CallLog).where(
@@ -309,6 +315,70 @@ async def create_appointment_record(
         except Exception:
             pass
         return True
+
+
+async def lock_clinic_for_booking(session, clinic_id) -> None:
+    """Serialise bookings for one clinic for the rest of this TRANSACTION.
+
+    Booking had two read-then-write races, both of which produce a wrong answer a
+    customer would notice:
+
+      * **time mode** — `is_slot_available` ran in its own session, then the insert
+        happened separately. Two callers asking for 15:00 at the same moment both
+        passed the check and both got the slot.
+      * **token mode** — `SELECT max(token_number)` then insert `max + 1`. Two
+        concurrent callers read the same maximum and were both handed the SAME token
+        number, so two people arrive believing they are number 5.
+
+    `pg_advisory_xact_lock` is TRANSACTION-scoped: it is released automatically at
+    COMMIT or ROLLBACK. That distinction matters here, because this database is
+    behind Supabase's pooler — a *session*-scoped advisory lock leaks onto a pooled
+    backend and never releases (measured; it is why background-job election uses a
+    lease table instead). A transaction-scoped lock is safe because the whole
+    transaction is pinned to one backend for its duration.
+
+    Scoped per clinic, so one busy tenant never blocks another.
+    """
+    if clinic_id is None:
+        return
+    # hashtext gives a stable bigint from the clinic id; the constant namespaces it
+    # so it cannot collide with any other advisory lock in the system.
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(:ns, hashtext(:cid))"),
+        {"ns": 4242, "cid": str(clinic_id)},
+    )
+
+
+async def is_slot_free_in_session(session, clinic_id, start_dt, duration_min=30, exclude_id=None) -> bool:
+    """Overlap check that runs in the CALLER'S transaction.
+
+    `is_slot_available` opens its own session, which is why it cannot be combined
+    with an insert atomically. Use this together with `lock_clinic_for_booking` so
+    the check and the insert are one indivisible step.
+    """
+    cid = to_uuid(clinic_id)
+    if cid is None or start_dt is None:
+        return True
+    from datetime import timedelta
+    dur = int(duration_min or 30)
+    req_end = start_dt + timedelta(minutes=dur)
+    rows = (await session.execute(
+        select(Appointment).where(
+            Appointment.clinic_id == cid,
+            Appointment.status == "scheduled",
+            Appointment.appointment_at.isnot(None),
+            Appointment.appointment_at >= start_dt - timedelta(hours=6),
+            Appointment.appointment_at <= req_end + timedelta(hours=6),
+        )
+    )).scalars().all()
+    for existing in rows:
+        if exclude_id is not None and str(existing.id) == str(exclude_id):
+            continue
+        e_start = existing.appointment_at
+        e_end = e_start + timedelta(minutes=int(existing.duration_min or 30))
+        if e_start < req_end and e_end > start_dt:
+            return False
+    return True
 
 
 async def is_slot_available(clinic_id, start_dt, duration_min=30, exclude_id=None) -> bool:
@@ -531,15 +601,20 @@ async def append_transcript(call_id: str, role: str, content: str):
     Session = get_sessionmaker()
     if Session is None or not call_id:
         return
+    from datetime import datetime as _dt
     async with Session() as session:
         result = await session.execute(select(CallLog).where(CallLog.call_id == call_id))
         call_log = result.scalar_one_or_none()
         message = {"role": role, "content": content}
+        now = _dt.utcnow()
         if call_log is None:
-            session.add(CallLog(call_id=call_id, transcript=[message]))
+            session.add(CallLog(call_id=call_id, transcript=[message], last_activity_at=now))
         else:
             # Reassign (not in-place append) so SQLAlchemy detects the change.
             call_log.transcript = (call_log.transcript or []) + [message]
+            # Marks how far the conversation actually got, so a call whose "ended"
+            # report never arrives can still be closed with a real duration.
+            call_log.last_activity_at = now
         await session.commit()
 
 
@@ -547,16 +622,69 @@ async def set_call_status(call_id: str, status: str):
     Session = get_sessionmaker()
     if Session is None or not call_id:
         return
+    from datetime import datetime as _dt
     async with Session() as session:
         result = await session.execute(select(CallLog).where(CallLog.call_id == call_id))
         call_log = result.scalar_one_or_none()
         if call_log is not None:
             call_log.status = status
             if status in ("completed", "failed", "transferred") and call_log.created_at:
-                from datetime import datetime
-                delta = datetime.utcnow() - call_log.created_at
-                call_log.duration = int(delta.total_seconds())
+                delta = _dt.utcnow() - call_log.created_at
+                call_log.duration = max(int(delta.total_seconds()), 0)
+                call_log.last_activity_at = _dt.utcnow()
             await session.commit()
+
+
+async def close_stale_calls(max_age_minutes: int = 15) -> int:
+    """Close call_logs rows left stuck at status="active"; returns how many.
+
+    The agent reports "call ended" on a best-effort background task. On Windows,
+    LiveKit's native layer panics during call teardown
+    (`malformed serialized RtcError` in webrtc-sys/src/rtc_error.rs) and kills the
+    worker before that report goes out — observed on a real call, which stayed
+    `active` with `duration: 0` permanently. Left alone those rows accumulate, the
+    dashboard's live view shows calls that will never end, and average-duration
+    stats are dragged toward zero.
+
+    Duration comes from the last transcript turn (`last_activity_at`) rather than
+    "now", so a row swept ten minutes late does not report a ten-minute call. A row
+    that never got a single turn is marked `failed` — nothing was ever said.
+    """
+    Session = get_sessionmaker()
+    if Session is None:
+        return 0
+    from datetime import datetime as _dt, timedelta as _td
+    cutoff = _dt.utcnow() - _td(minutes=max(int(max_age_minutes), 1))
+    closed = 0
+    async with Session() as session:
+        rows = (await session.execute(
+            select(CallLog).where(
+                CallLog.status == "active",
+                CallLog.created_at < cutoff,
+            )
+        )).scalars().all()
+        for row in rows:
+            turns = len(row.transcript or []) if isinstance(row.transcript, list) else 0
+            end_at = row.last_activity_at or row.created_at
+            if turns > 0:
+                # The caller did have a conversation; the agent just died before
+                # it could say so.
+                row.status = "completed"
+                row.duration = max(int((end_at - row.created_at).total_seconds()), 0)
+            else:
+                row.status = "failed"
+                row.duration = 0
+            row.last_activity_at = end_at
+            closed += 1
+        if closed:
+            await session.commit()
+    if closed:
+        logger.warning(
+            f"Closed {closed} stale 'active' call(s) older than {max_age_minutes}m. "
+            "The agent's end-of-call report did not arrive — usually the LiveKit "
+            "teardown panic on Windows. Running the agent on Linux removes the cause."
+        )
+    return closed
 
 
 # ----- Scheduler helpers ----------------------------------------------------

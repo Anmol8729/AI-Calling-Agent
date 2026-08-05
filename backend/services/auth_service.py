@@ -18,14 +18,39 @@ def get_password_hash(password: str) -> str:
     return hashed.decode('utf-8')
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    """Sign a user session token.
+
+    Callers should include a `ver` claim carrying the user's `token_version`;
+    `get_current_user` compares it against the database on every request, which is
+    what allows a session to be revoked (password change, "log out everywhere",
+    suspension). A token minted without `ver` is treated as version 0, so tokens
+    issued before that column existed keep working instead of logging everyone out.
+    """
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
         expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire, "iat": datetime.utcnow()})
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
+
+
+def session_claims(user, clinic_id_str: Optional[str] = None) -> dict:
+    """Standard claim set for a user session token.
+
+    One place to build these, so login, registration and any future path cannot
+    drift apart and accidentally omit `ver` (which would make that token
+    unrevocable).
+    """
+    return {
+        "sub": str(user.id),
+        "role": user.role,
+        "clinic_id": clinic_id_str if clinic_id_str is not None else (
+            str(user.clinic_id) if user.clinic_id else None
+        ),
+        "ver": int(getattr(user, "token_version", 0) or 0),
+    }
 
 def decode_access_token(token: str) -> Optional[dict]:
     try:

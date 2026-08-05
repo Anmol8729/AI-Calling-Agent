@@ -1,0 +1,40 @@
+# Without this file, the Dockerfile's `COPY . .` bakes real secrets and the full
+# git history into the image. Anyone who can pull the image gets production
+# credentials. Keep this list in sync with .gitignore.
+
+# Secrets — NEVER in an image
+.env
+.env.*
+!.env.example
+
+# Version control history
+.git
+.gitignore
+
+# Local virtualenvs / installed deps (reinstalled from requirements.txt)
+.venv/
+venv/
+agent/.venv/
+**/__pycache__/
+**/*.py[cod]
+
+# Frontend: built assets are served separately; node_modules is huge
+frontend/node_modules/
+frontend/dist/
+node_modules/
+
+# Logs and local artefacts
+*.log
+agent.err.log
+agent.out.log
+frontend/next-dev.*.log
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Tests and docs are not needed at runtime
+.pytest_cache/
+.kiro/

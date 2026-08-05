@@ -1,22 +1,64 @@
-fastapi>=0.110.0
-uvicorn[standard]>=0.28.0
-websockets>=12.0
-openai>=1.12.0
-httpx>=0.26.0
-python-dotenv>=1.0.0
-certifi>=2024.0.0
-pydantic-settings>=2.0.0
-sqlalchemy[asyncio]>=2.0.25
-asyncpg>=0.29.0
-greenlet>=3.0.0
-python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
-bcrypt>=4.0.0
-apscheduler>=3.10.0
-celery>=5.3.0
-redis>=5.0.0
-loguru>=0.7.0
-slowapi>=0.1.9
-python-multipart>=0.0.9
-email-validator>=2.0.0
-pytest>=8.0.0
+# Clarivo backend dependencies — EXACT pins.
+#
+# Previously every line used `>=`, which meant two builds of the same commit could
+# install different code. A breaking minor release (or a compromised one) would land
+# straight in production with no change on our side, and a failure would be
+# impossible to reproduce locally. These versions are the ones the application is
+# actually verified against.
+#
+# Upgrading: bump one line, run `pytest backend/tests`, start the app, and check the
+# startup log. Do not bump several at once — it makes a regression hard to attribute.
+#
+# Removed as unused (verified: zero imports anywhere in backend/):
+#   celery, apscheduler  - background work runs as asyncio tasks elected by
+#                          backend/services/job_lock.py, not a task queue
+#   loguru               - the codebase uses the standard `logging` module
+#   openai               - the backend's LLM modules were deleted with the legacy
+#                          /media-stream pipeline; the voice agent has its own venv
+#   razorpay             - backend/services/razorpay_client.py calls the REST API
+#                          with httpx and verifies signatures with hmac directly
+
+# ----- web framework -----
+fastapi==0.138.0
+uvicorn[standard]==0.49.0
+starlette==1.3.1
+# Required by FastAPI to parse the inbound provider webhook, which arrives as a
+# form body (routes/calls.py: `await request.form()`).
+python-multipart==0.0.32
+websockets==16.0
+
+# ----- validation / config -----
+pydantic==2.13.4
+pydantic-settings==2.14.2
+python-dotenv==1.2.2
+email-validator==2.3.0
+
+# ----- database -----
+sqlalchemy[asyncio]==2.0.51
+asyncpg==0.31.0
+greenlet==3.5.3
+# Schema versioning with a rollback path (backend/migrations).
+alembic==1.19.0
+
+# ----- auth -----
+python-jose[cryptography]==3.5.0
+passlib[bcrypt]==1.7.4
+bcrypt==5.0.0
+
+# ----- http / tls -----
+httpx==0.28.1
+# CA bundle. Note the DATABASE connection does NOT use this: Supabase's root is
+# self-signed and is pinned separately at backend/certs/.
+certifi==2026.6.17
+
+# ----- rate limiting -----
+slowapi==0.1.10
+# slowapi's storage layer; pinned explicitly because the Redis-backed limiter
+# depends on its behaviour (services/limiter.py probes it at boot).
+limits==5.8.0
+# Redis client: shared rate-limit counters and the cross-process event bus.
+redis==8.0.1
+
+# ----- tests -----
+pytest==9.1.1
+pytest-asyncio==1.3.0

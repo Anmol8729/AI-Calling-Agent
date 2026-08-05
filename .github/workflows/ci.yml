@@ -1,0 +1,197 @@
+name: CI
+
+# Runs on every push and pull request. Before this there was no CI at all, so a
+# regression in tenant isolation or authorisation could ship unnoticed — the exact
+# class of bug that matters most in a multi-tenant product.
+#
+# No production credentials are exposed to this workflow. The database-backed
+# tenant-isolation tests skip themselves automatically; run those locally or against
+# staging before a release (see backend/tests/test_tenant_isolation.py).
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A new push supersedes an in-flight run for the same ref.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend — import, lint, security tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        # Exact pins, so CI installs what production installs.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install ruff
+
+      - name: Import the app
+        # Catches syntax errors, bad imports and settings that fail at module level
+        # before any test runs.
+        env:
+          JWT_SECRET: ci-placeholder-secret-not-used-for-anything-real
+          AGENT_INTERNAL_SECRET: ci-placeholder-agent-secret-value-here
+        run: python -c "import backend.app; print('app imports cleanly')"
+
+      - name: Lint
+        # Non-blocking for now: the goal is visibility, not a red build on style.
+        run: ruff check backend || true
+
+      - name: Security + regression tests
+        env:
+          JWT_SECRET: ci-placeholder-secret-not-used-for-anything-real
+          AGENT_INTERNAL_SECRET: ci-placeholder-agent-secret-value-here
+        run: python -m pytest backend/tests -v
+
+      - name: Confirm the security suite actually ran
+        # A security suite that quietly collects nothing is worse than none at all,
+        # because the badge stays green. Fail if the contract tests disappear.
+        env:
+          JWT_SECRET: ci-placeholder-secret-not-used-for-anything-real
+          AGENT_INTERNAL_SECRET: ci-placeholder-agent-secret-value-here
+        run: python backend/tests/_assert_suite_size.py
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail on credentials committed to the repository
+        # .env.example is tracked, so a real value pasted into it would be published.
+        run: |
+          set +e
+          PATTERN='sk-api|gsk_[A-Za-z0-9]{20}|EAAU[A-Za-z0-9]{20}|AIza[A-Za-z0-9]{20}|postgresql://[^:]+:[^@]+@'
+          # certs/ holds Supabase's PUBLIC root CA — a certificate, not a secret,
+          # whose base64 body can trip the entropy-style patterns.
+          MATCHES=$(grep -rInE "$PATTERN" \
+            --binary-files=without-match \
+            --exclude-dir=.git \
+            --exclude-dir=node_modules \
+            --exclude-dir=.venv \
+            --exclude-dir=dist \
+            --exclude-dir=certs \
+            --exclude=package-lock.json \
+            . )
+          if [ -n "$MATCHES" ]; then
+            echo "Possible secrets found:"
+            echo "$MATCHES"
+            exit 1
+          fi
+          echo "No secrets detected."
+
+      - name: Ensure .env is not tracked
+        run: |
+          if git ls-files --error-unmatch .env 2>/dev/null; then
+            echo ".env is tracked by git — remove it from the index immediately."
+            exit 1
+          fi
+          echo ".env is correctly untracked."
+
+      - name: Ensure .dockerignore keeps secrets out of images
+        # Without this the Dockerfile's `COPY . .` bakes .env and the full git
+        # history into every image.
+        run: |
+          test -f .dockerignore || { echo ".dockerignore is missing"; exit 1; }
+          for entry in .env .git; do
+            grep -qxF "$entry" .dockerignore || { echo "$entry not excluded"; exit 1; }
+          done
+          echo ".dockerignore covers the essentials."
+
+  frontend:
+    name: Frontend — lint and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+  migrations:
+    name: Migrations — reversible against a scratch database
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # A migration that cannot be rolled back cannot be safely deployed. Proven here
+    # against a throwaway Postgres, never against a real one.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: clarivo_ci
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Upgrade, downgrade, upgrade again
+        env:
+          # Local scratch database: db.py skips TLS for localhost.
+          DATABASE_URL: postgresql://postgres:ci@127.0.0.1:5432/clarivo_ci
+          JWT_SECRET: ci-placeholder-secret-not-used-for-anything-real
+          AGENT_INTERNAL_SECRET: ci-placeholder-agent-secret-value-here
+        run: |
+          python -m alembic upgrade head
+          python -m alembic downgrade base
+          python -m alembic upgrade head
+          echo "migrations are reversible"
+
+      - name: Fail if the models have drifted from the migrations
+        env:
+          DATABASE_URL: postgresql://postgres:ci@127.0.0.1:5432/clarivo_ci
+          JWT_SECRET: ci-placeholder-secret-not-used-for-anything-real
+          AGENT_INTERNAL_SECRET: ci-placeholder-agent-secret-value-here
+        # Catches a model change committed without its migration, which would then
+        # only surface as a missing column in production.
+        run: python -m alembic check

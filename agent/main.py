@@ -1,5 +1,5 @@
 """
-VoxPilot LiveKit voice agent.
+Clarivo LiveKit voice agent.
 
 Runs the call pipeline: Deepgram STT -> MiniMax LLM (OpenAI-compatible) ->
 MiniMax TTS (custom plugin). It joins the LiveKit room created for each inbound
@@ -16,6 +16,7 @@ Run:  python main.py dev      (dev mode, connects to LiveKit Cloud as a worker)
 """
 
 import asyncio
+import contextvars
 import logging
 import os
 from datetime import datetime
@@ -45,7 +46,7 @@ from livekit.agents import llm as _lk_llm  # noqa: E402
 
 from minimax_tts import MiniMaxTTS  # noqa: E402
 
-logger = logging.getLogger("voxpilot-agent")
+logger = logging.getLogger("clarivo-agent")
 
 # --- Compatibility shim -----------------------------------------------------
 # MiniMax's streaming chat responses can include a usage object whose token
@@ -65,6 +66,50 @@ def _lenient_completion_usage(*args, **kwargs):
 
 
 _lk_llm.CompletionUsage = _lenient_completion_usage
+
+
+def _strip_chat_extra(chat_ctx: "_lk_llm.ChatContext") -> "_lk_llm.ChatContext":
+    """Return a copy of `chat_ctx` with every item's provider-specific `.extra` cleared.
+
+    LiveKit stashes provider blobs (Gemini "thought signatures" under the "google"
+    key, etc.) on each chat item's `.extra`, then re-emits them as an
+    `extra_content` property on assistant / tool_call messages for EVERY
+    OpenAI-compatible provider (see livekit/agents/llm/_provider_format/openai.py,
+    `_EXTRA_CONTENT_KEYS = ("google", "livekit", "xai")`).
+
+    Because the FallbackAdapter shares ONE chat context across the whole chain, a
+    single Gemini turn poisons it for stricter providers. Groq validates the schema
+    and rejects the request outright:
+
+        400 'messages.7' : for 'role:assistant' the following must be satisfied
+            [('messages.7' : property 'extra_content' is unsupported)]
+
+    Net effect on a live call: Groq worked only until the first assistant tool call,
+    then failed on every turn -> with Gemini 503/429 at the same time, ALL LLMs were
+    unavailable and the caller heard silence.
+
+    `ChatContext.copy()` reuses the same item objects, so mutating `.extra` in place
+    would also strip Gemini's own signatures. Copy just the dirty items instead.
+    """
+    items = []
+    dirty = False
+    for item in chat_ctx.items:
+        if getattr(item, "extra", None):
+            item = item.model_copy(update={"extra": {}})
+            dirty = True
+        items.append(item)
+    return _lk_llm.ChatContext(items) if dirty else chat_ctx
+
+
+class _StrictSchemaLLM(openai.LLM):
+    """openai.LLM for providers that reject unknown message properties (Groq, MiniMax).
+
+    Only sanitises the outgoing payload; nothing else about the plugin changes.
+    """
+
+    def chat(self, *, chat_ctx: "_lk_llm.ChatContext", **kwargs):  # type: ignore[override]
+        return super().chat(chat_ctx=_strip_chat_extra(chat_ctx), **kwargs)
+
 
 # Where the FastAPI backend lives + the shared secret for the internal agent
 # endpoints. Both read from the root .env. If the secret is empty, all DB actions
@@ -106,20 +151,18 @@ TOOL_RULES = (
     "- NEVER speak or write code, function names, JSON, or tool-call syntax (for example never say "
     "'functions.book_appointment(...)'). To use a tool, just call it — the caller only ever hears "
     "plain Hindi.\n"
-    "- Before booking, get the caller's REAL name and CONFIRM it. Never treat filler words like "
-    "'ji boliye', 'haan', 'hello', 'bataiye', 'namaste' as a name. If you did not hear the name "
-    "clearly, or it sounds garbled, or you are not fully sure, say you couldn't hear it properly and "
-    "ask them to say it again slowly (ask them to spell it if it is still unclear). Then say the name "
-    "back to confirm and wait for a yes before continuing.\n"
+    "- Before booking, get the caller's REAL name and CONFIRM it (how to ask + confirm is under "
+    "PATIENT INTAKE below). Never treat filler words like 'ji boliye', 'haan', 'hello', 'bataiye', "
+    "'namaste' as a name.\n"
     "- Do NOT push, suggest, or bring up booking on your own. Begin collecting booking details (name, "
     "age, reason) and call book_appointment ONLY when the caller ASKS to book an appointment or to get "
     "a token/number. If the caller only has a question, answer it and do not ask for their details."
 )
 
 BASE_PERSONA = (
-    "You are a warm, friendly, human female phone receptionist. Speak Hindi by default, naturally "
-    "and in short spoken sentences (one at a time), like a real person on the phone — never robotic, "
-    "no long lists. Ask only one thing at a time and keep each reply to ONE short sentence. If "
+    "You are a warm, friendly, human female phone receptionist. Speak naturally, like a real person "
+    "on the phone — never robotic, no long lists. Ask only one thing at a time and keep each reply "
+    "to ONE short sentence. If "
     "something isn't in your business information, say you'll have someone follow up rather than "
     "guessing. When the caller is done (bye, thanks, 'theek hai'), say one short goodbye and then "
     "call end_call. Reply with ONLY the words to speak, in Hindi — never your thoughts or any "
@@ -129,9 +172,8 @@ BASE_PERSONA = (
 TOKEN_MODE_GUIDE = (
     "\n\nBOOKING — this business uses TOKEN NUMBERS (a daily queue, no fixed times). Do this ONLY when "
     "the caller asks to book or get a token/number:\n"
-    "- First collect the patient details described below (a CONFIRMED name, age, and reason). Do NOT "
-    "ask for a date or time. Once you have them, CALL book_appointment, then tell the caller the "
-    "EXACT token number that book_appointment returned.\n"
+    "- First complete PATIENT INTAKE below (CONFIRMED name, age, reason). Do NOT ask for a date or "
+    "time. Then CALL book_appointment and tell the caller the EXACT token number it returned.\n"
     "- If the caller asks which number is being served or how long till their turn, CALL check_queue "
     "and say only what it returns."
 )
@@ -139,10 +181,10 @@ TOKEN_MODE_GUIDE = (
 TIME_MODE_GUIDE = (
     "\n\nBOOKING — this business uses fixed TIME SLOTS. Do this ONLY when the caller asks to book an "
     "appointment:\n"
-    "- Collect the patient details described below (a CONFIRMED name, age, and reason), plus the day "
-    "+ time they want. Convert the time to ISO-8601 (e.g. 2026-07-02T15:00) using the current date, "
-    "CALL check_availability, and if it is free CALL book_appointment with that ISO time and the "
-    "patient details. If taken, offer another time. Only confirm the booking after book_appointment returns."
+    "- Complete PATIENT INTAKE below (CONFIRMED name, age, reason), plus the day + time they want. "
+    "Convert the time to ISO-8601 (e.g. 2026-07-02T15:00) using the current date, CALL "
+    "check_availability, and if free CALL book_appointment with that ISO time and the patient "
+    "details. If taken, offer another time. Only confirm after book_appointment returns."
 )
 
 TOOLS_GUIDE = (
@@ -162,10 +204,9 @@ PATIENT_INTAKE_GUIDE = (
     "then, and do NOT bring up booking yourself.\n"
     "\nPATIENT INTAKE — this is a healthcare centre, so ONCE the caller wants to book (and only then), "
     "collect the patient's details ONE at a time, each in one short Hindi sentence, in this order:\n"
-    "1. NAME — ask the patient's full name. If you did not hear it clearly, it sounds garbled, or you "
-    "are unsure, say you couldn't hear it properly and ask them to say it again slowly (ask them to "
-    "spell it if it is still unclear). Then say it back to confirm, e.g. 'मैं कन्फ़र्म कर लूँ, आपका "
-    "नाम ___ है ना?', and wait for a yes.\n"
+    "1. NAME — ask the patient's full name. If it was unclear, garbled, or you are unsure, say you "
+    "couldn't hear properly and ask them to repeat it slowly (ask them to spell it if still unclear). "
+    "Then confirm it back, e.g. 'मैं कन्फ़र्म कर लूँ, आपका नाम ___ है ना?', and wait for a yes.\n"
     "2. AGE — ask the patient's age (umar) in years.\n"
     "3. REASON — ask briefly what problem or symptom they want to see the doctor for.\n"
     "Only after you have a CONFIRMED name AND the age, call book_appointment with patient_name, age, "
@@ -180,6 +221,39 @@ LANGUAGE_RULE = (
     "DEVANAGARI script. Do NOT use Hinglish, do NOT romanize Hindi, and do NOT mix in English words "
     "— always use the common Hindi word instead. The ONLY exception is an unavoidable proper name "
     "such as the business name. For example, say 'आपकी बुकिंग हो गई है', not 'aapki booking ho gayi'."
+    # Your text is fed straight to a text-to-speech voice, which reads it LITERALLY.
+    # Observed on a live call: the model shortened डॉक्टर to 'डॉ.' and the voice spoke it
+    # as "दो" (= "two"), so the caller heard "today two Anjali Rao is". Abbreviations and
+    # ASCII digits are the two things that break the spoken output, so both are banned.
+    "\n\nSPOKEN OUTPUT — your words go straight to a voice that reads them EXACTLY as written, "
+    "so write everything the way it should be SPOKEN OUT LOUD:\n"
+    "- NEVER abbreviate. Always write 'डॉक्टर' in full — never 'डॉ.'. No short forms of any kind.\n"
+    "- Write numbers in Devanagari digits (१०, ३००, २) rather than English digits (10, 300, 2).\n"
+    "- Do not use symbols the voice cannot say, such as /, &, %, or brackets — write the word."
+)
+
+# Always appended (like LANGUAGE_RULE) so brevity still applies when a tenant has
+# its own system_prompt.
+#
+# Observed on a live call: given a detailed knowledge base the model recites
+# EVERYTHING it knows. Asked only "which doctor is in right now?", it read out both
+# doctors' full weekly schedules - ~250 characters, 4.3 seconds of speech. That is
+# the single most expensive habit it has: MiniMax TTS bills per CHARACTER and is
+# about half of the per-call cost, so ~390 wasted characters is ~Rs 2.25 per call.
+# It also makes the caller wait and does not sound like a receptionist.
+# A hard number ("at most 25 words") is obeyed far better than "be brief".
+# A second sentence is not just wordy, it is AUDIBLE: this TTS plugin is
+# non-streaming, so LiveKit synthesizes each sentence in a separate request. Every
+# extra sentence adds its own ~0.6s time-to-first-byte, and the caller hears that as
+# a gap in the middle of the reply ("flush audio emitter due to slow audio
+# generation" in the logs). One sentence = one request = no gap.
+BREVITY_RULE = (
+    "\n\nLENGTH — VERY IMPORTANT: Reply with EXACTLY ONE sentence of at most 25 words, and "
+    "NEVER write a second sentence. Answer ONLY what the caller actually asked. Do NOT "
+    "volunteer extra facts, do NOT list other doctors, days, timings, prices or services "
+    "they did not ask for, and do NOT repeat anything you already said. If the full answer "
+    "genuinely needs more, give the single most useful fact in that one sentence and ask "
+    "whether they want the rest."
 )
 
 DEFAULT_GREETING = "नमस्ते! मैं आपकी कैसे मदद कर सकती हूँ?"
@@ -249,26 +323,51 @@ async def _strip_think_stream(text):
         yield buf
 
 
+# Spans that must NEVER be spoken, as (opening marker, closing marker) pairs.
+# Models keep inventing new ways to write a tool call as plain TEXT instead of
+# actually calling it, and whatever they write ends up in the TTS stream:
+#   <think>...</think>                     reasoning models (MiniMax M1/M2/M3)
+#   ```functions.end_call({})```           MiniMax-Text-01
+#   <function=end_call>{}</function>       Groq llama-3.3-70b  (observed on a live call)
+#   <tool_call>...</tool_call>             common Qwen/llama chat templates
+# "<function" (no '=') is used on purpose so <function=x>, <function_call> and
+# <functions...> are all caught. It cannot match "</function>" because of the slash.
+_TTS_STRIP_SPANS = (
+    (_THINK_OPEN, _THINK_CLOSE),
+    ("```", "```"),
+    ("<function", "</function>"),
+    ("<tool_call>", "</tool_call>"),
+)
+
+
 async def _clean_tts_stream(text):
-    """Drop <think>...</think> AND ```...``` (code / tool-call syntax) spans from the
-    streamed TTS text, so the caller never hears reasoning or code. Some MiniMax
-    models write a tool call as text (```functions.end_call({})```) instead of
-    calling it — this stops that from being spoken. Robust to markers split across
-    chunks."""
+    """Remove every span in _TTS_STRIP_SPANS from the streamed TTS text, so the caller
+    only ever hears plain speech - never reasoning, code, or tool-call syntax.
+
+    Robust to a marker being split across streamed chunks: when the tail of the
+    buffer looks like the start of a marker, that tail is held back until the next
+    chunk arrives instead of being spoken."""
     buf = ""
-    state = "normal"  # normal | think | code
+    active = -1  # index into _TTS_STRIP_SPANS, or -1 when outside any span
     async for chunk in text:
         if not chunk:
             continue
         buf += chunk
         out = ""
         while buf:
-            if state == "normal":
-                i_think = buf.find(_THINK_OPEN)
-                i_code = buf.find("```")
-                cands = [i for i in (i_think, i_code) if i != -1]
-                if not cands:
-                    hold = max(_suffix_prefix_len(buf, _THINK_OPEN), _suffix_prefix_len(buf, "```"))
+            if active == -1:
+                # Find the EARLIEST opening marker of any span.
+                best_i, best_span = -1, -1
+                for idx, (opener, _closer) in enumerate(_TTS_STRIP_SPANS):
+                    i = buf.find(opener)
+                    if i != -1 and (best_i == -1 or i < best_i):
+                        best_i, best_span = i, idx
+                if best_i == -1:
+                    # No marker. Hold back a possible partial marker at the tail.
+                    hold = max(
+                        (_suffix_prefix_len(buf, opener) for opener, _ in _TTS_STRIP_SPANS),
+                        default=0,
+                    )
                     if hold:
                         out += buf[:-hold]
                         buf = buf[-hold:]
@@ -276,33 +375,23 @@ async def _clean_tts_stream(text):
                         out += buf
                         buf = ""
                     break
-                i = min(cands)
-                out += buf[:i]
-                if i == i_think:
-                    buf = buf[i + len(_THINK_OPEN):]
-                    state = "think"
-                else:
-                    buf = buf[i + 3:]
-                    state = "code"
-            elif state == "think":
-                j = buf.find(_THINK_CLOSE)
+                out += buf[:best_i]
+                buf = buf[best_i + len(_TTS_STRIP_SPANS[best_span][0]):]
+                active = best_span
+            else:
+                closer = _TTS_STRIP_SPANS[active][1]
+                j = buf.find(closer)
                 if j == -1:
-                    hold = _suffix_prefix_len(buf, _THINK_CLOSE)
+                    # Still inside the span: drop everything except a partial closer.
+                    hold = _suffix_prefix_len(buf, closer)
                     buf = buf[-hold:] if hold else ""
                     break
-                buf = buf[j + len(_THINK_CLOSE):]
-                state = "normal"
-            else:  # code
-                j = buf.find("```")
-                if j == -1:
-                    hold = _suffix_prefix_len(buf, "```")
-                    buf = buf[-hold:] if hold else ""
-                    break
-                buf = buf[j + 3:]
-                state = "normal"
+                buf = buf[j + len(closer):]
+                active = -1
         if out:
             yield out
-    if buf and state == "normal":
+    # Anything left mid-span is tool syntax the model never closed - drop it.
+    if buf and active == -1:
         yield buf
 
 
@@ -365,17 +454,32 @@ def _try_parse_iso(s):
         return None
 
 
-async def _agent_post(path: str, body: dict, timeout: float = 15.0):
-    """POST to a backend internal agent endpoint with the shared secret.
+# Per-call token issued by /api/calls/agent-context. It scopes this worker to ONE
+# clinic and ONE call, so the long-lived shared secret is no longer sent to (or
+# usable against) any other endpoint.
+#
+# A ContextVar, not a module global: with AGENT_RECYCLE_AFTER_CALL=0 (the Linux
+# setting) one worker process serves several calls, potentially concurrently, and a
+# global would let call B overwrite call A's token and write into the wrong tenant.
+# Each LiveKit job runs in its own task tree, and asyncio.create_task copies the
+# current context, so every background report inherits the right call's token.
+_CALL_TOKEN: contextvars.ContextVar = contextvars.ContextVar("clarivo_call_token", default="")
 
-    Returns (status_code, data_dict). Raises on transport errors (callers handle).
+
+async def _agent_post(path: str, body: dict, timeout: float = 15.0):
+    """POST to a backend internal agent endpoint.
+
+    Sends the per-call token when one has been issued; only the /agent-context
+    bootstrap falls back to the shared secret. Returns (status_code, data_dict).
+    Raises on transport errors (callers handle).
     """
+    token = _CALL_TOKEN.get()
+    headers = (
+        {"Authorization": f"Bearer {token}"} if token
+        else {"X-Internal-Secret": INTERNAL_SECRET}
+    )
     async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(
-            f"{BACKEND_URL}{path}",
-            headers={"X-Internal-Secret": INTERNAL_SECRET},
-            json=body,
-        )
+        resp = await client.post(f"{BACKEND_URL}{path}", headers=headers, json=body)
     try:
         data = resp.json()
     except Exception:
@@ -383,18 +487,72 @@ async def _agent_post(path: str, body: dict, timeout: float = 15.0):
     return resp.status_code, data
 
 
-async def _fetch_context(did):
-    """Load per-call business config from the backend. {} on any failure."""
+async def _fetch_context(did, call_id=None):
+    """Load per-call business config from the backend, and capture the call token.
+
+    This is the ONLY request that uses the shared secret. The backend resolves the
+    clinic from the dialed DID and returns a token bound to (clinic, call); storing
+    it here means every later request is scoped to just this call. {} on failure.
+    """
     if not INTERNAL_SECRET:
         return {}
     try:
-        status, data = await _agent_post("/api/calls/agent-context", {"did": did})
+        # Force the bootstrap to use the shared secret even if a previous call in
+        # this process left a token in a parent context.
+        _CALL_TOKEN.set("")
+        status, data = await _agent_post(
+            "/api/calls/agent-context", {"did": did, "call_id": call_id}
+        )
         if status == 200 and data.get("success"):
-            return data.get("data") or {}
+            ctx_data = data.get("data") or {}
+            token = ctx_data.get("call_token") or ""
+            if token:
+                _CALL_TOKEN.set(token)
+            else:
+                logger.error(
+                    "agent-context returned no call_token — bookings and call logs "
+                    "will fail. Is the backend up to date?"
+                )
+            return ctx_data
         logger.warning(f"agent-context -> {status} {data.get('message')}")
     except Exception as e:
         logger.warning(f"agent-context failed: {e}")
     return {}
+
+
+# ---------------------------------------------------------------------------
+# Call logging (feeds the dashboard's Calls page / live view / funnel / quota)
+# ---------------------------------------------------------------------------
+# Every one of those views reads the backend's `call_logs` table. It used to be
+# filled by the /media-stream websocket, which this LiveKit architecture no longer
+# uses — so it stayed empty and the dashboard showed no calls at all. We report the
+# lifecycle here instead.
+#
+# These are strictly FIRE-AND-FORGET: a call log is never worth adding latency to a
+# live conversation, so nothing here is awaited on the critical path and every
+# failure is swallowed after logging.
+
+_bg_tasks: set = set()
+
+
+def _fire(coro):
+    """Run a coroutine in the background without blocking the conversation."""
+    task = asyncio.create_task(coro)
+    # Hold a reference until it finishes, otherwise the task can be garbage
+    # collected mid-flight and Python warns about it.
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
+
+async def _report(path: str, body: dict) -> None:
+    if not INTERNAL_SECRET:
+        return
+    try:
+        status, data = await _agent_post(path, body, timeout=10.0)
+        if status != 200:
+            logger.warning(f"{path} -> {status} {data.get('message')}")
+    except Exception as e:
+        logger.warning(f"{path} failed: {e}")
 
 
 async def _warm_llm(agent_llm) -> None:
@@ -428,13 +586,18 @@ def _build_system_prompt(ctx_data: dict) -> str:
         f"\n\nYou are the receptionist for {business}. The current date and time is {now_str}."
     )
     parts.append(LANGUAGE_RULE)
+    parts.append(BREVITY_RULE)
     parts.append(TOKEN_MODE_GUIDE if mode == "token" else TIME_MODE_GUIDE)
     parts.append(PATIENT_INTAKE_GUIDE)
     parts.append(TOOLS_GUIDE)
     if kb:
+        # "Answer only the part that was asked" is repeated here on purpose: this block
+        # is where the model gets its urge to recite the whole knowledge base, so the
+        # limit lands better next to the facts themselves than only in BREVITY_RULE.
         parts.append(
             "\n\nBusiness information you can use to answer the caller (rely on these facts; if a "
-            "question isn't covered, say you'll have someone follow up):\n" + kb
+            "question isn't covered, say you'll have someone follow up). Quote ONLY the one detail "
+            "the caller asked for — never read out a whole list, schedule, or price table:\n" + kb
         )
     return "".join(parts)
 
@@ -457,11 +620,15 @@ class VoxAgent(Agent):
     # --- helpers -----------------------------------------------------------
 
     def _call_body(self) -> dict:
-        """Common identity for backend calls: clinic + DID + live caller number."""
-        live_did, caller = _sip_numbers(get_job_context().room)
+        """Common identity for backend calls: the live caller number.
+
+        The clinic is NOT sent any more — the backend reads it from the per-call
+        token, so a request can no longer name the tenant it writes to.
+        `booking_mode` stays as a hint that saves the backend one tenant read; it
+        is re-read from the DB if it is not a value the backend recognises.
+        """
+        _live_did, caller = _sip_numbers(get_job_context().room)
         return {
-            "clinic_id": self._clinic_id,
-            "did": self._did or live_did,
             "caller_phone": caller,
             "booking_mode": self._booking_mode,
         }
@@ -544,7 +711,8 @@ class VoxAgent(Agent):
         appt_at = _try_parse_iso(preferred_time)
         if not appt_at:
             return "Kripya ek specific din aur samay batayein."
-        body = {"clinic_id": self._clinic_id, "did": self._did, "appointment_at": appt_at}
+        # No clinic_id: the backend takes it from the per-call token.
+        body = {"appointment_at": appt_at}
         try:
             status, data = await _agent_post("/api/calls/agent-availability", body)
         except Exception as e:
@@ -675,6 +843,16 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # native panic does not occur and one worker can serve many calls).
     if os.getenv("AGENT_RECYCLE_AFTER_CALL", "1").strip() != "0":
         async def _recycle_worker():
+            # os._exit skips all cleanup, so let the in-flight call-log reports land
+            # first — otherwise the call would never be marked completed and would
+            # sit "active" forever on the dashboard's live view.
+            if _bg_tasks:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*list(_bg_tasks), return_exceptions=True), timeout=3.0
+                    )
+                except Exception:
+                    pass
             logger.info("Call ended — recycling worker process (Windows teardown workaround).")
             os._exit(0)
         ctx.add_shutdown_callback(_recycle_worker)
@@ -684,10 +862,38 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # SIP participant so the DID is actually available (reading too early gave
     # None -> single-clinic fallback, which can't work for multiple clinics).
     did, caller = await _resolve_sip_numbers(ctx)
-    ctx_data = await _fetch_context(did)
+
+    # Stale-dispatch guard. After a network outage LiveKit delivers the job requests
+    # it queued up, including ones for calls the caller already abandoned. Those rooms
+    # are EMPTY: _resolve_sip_numbers logs "wait_for_participant timed out" and the DID
+    # comes back None. Continuing would run a whole session against nobody - greeting
+    # synthesis, a Deepgram socket and an LLM call, all billable - and when a REAL job
+    # is running in the same process at the same time (observed live: two jobs 5s
+    # apart), the two sessions fight over the audio and the caller hears broken speech.
+    # Nothing to talk to => end the job now. The room is left for LiveKit to reap.
+    if not ctx.room.remote_participants:
+        logger.warning(
+            "No participant in room %s after waiting - stale/duplicate dispatch, ending job.",
+            ctx.room.name,
+        )
+        return
+
+    # The room name is unique per call, so it doubles as the call id. Needed BEFORE
+    # fetching context, because the per-call token is bound to it.
+    call_id = ctx.room.name
+
+    ctx_data = await _fetch_context(did, call_id)
     clinic_id = ctx_data.get("clinic_id")
     business_name = ctx_data.get("business_name") or "our business"
     logger.info(f"Call context: did={did} caller={caller} clinic={clinic_id} business={business_name!r}")
+
+    # Log the call so the dashboard can show it — live now, and in history after.
+    # The clinic is taken from the call token server-side, so it is not sent here.
+    _fire(_report("/api/calls/agent-call-start", {
+        "call_id": call_id,
+        "caller_phone": caller,
+        "direction": "inbound",
+    }))
 
     system_prompt = os.getenv("AGENT_SYSTEM_PROMPT") or _build_system_prompt(ctx_data)
 
@@ -713,42 +919,140 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # TTS stays MiniMax below, so the cloned voice is unchanged.
     _gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
     _groq_key = os.getenv("GROQ_API_KEY", "").strip()
-    if _gemini_key:
+    # AGENT_LLM_PROVIDER forces a provider (gemini | groq | minimax) so the two can be
+    # A/B tested on real calls WITHOUT deleting keys from .env. Empty = the default
+    # auto order below (Gemini -> Groq -> MiniMax).
+    #
+    # Measured from a home connection in India with this exact system prompt:
+    #   Gemini gemini-flash-latest : ~2.5-3.2s to first token
+    #   Groq   llama-3.3-70b       : ~0.2-0.7s to first token
+    # Groq is far snappier, but its FREE tier (~12k tokens/min) can 429 mid-call and
+    # the agent then goes silent — so it needs either a paid tier or AGENT_PREEMPTIVE=0
+    # (which halves tokens by not firing a second speculative request per turn).
+    _provider = os.getenv("AGENT_LLM_PROVIDER", "").strip().lower()
+    if _provider == "groq" and not _groq_key:
+        logger.warning("AGENT_LLM_PROVIDER=groq but GROQ_API_KEY is empty — falling back to auto.")
+        _provider = ""
+    if _provider == "gemini" and not _gemini_key:
+        logger.warning("AGENT_LLM_PROVIDER=gemini but GEMINI_API_KEY is empty — falling back to auto.")
+        _provider = ""
+    # Ordered LLM chain: the first entry serves the call, the rest are failovers.
+    # AGENT_LLM_ORDER sets that order, e.g. "groq,gemini,minimax". This matters a lot:
+    # whichever provider is first pays the latency, and if it is rate-limited every
+    # turn wastes a failed attempt (up to attempt_timeout of caller silence) before
+    # failing over. Put the provider with real quota FIRST.
+    _order = [
+        p.strip().lower()
+        for p in os.getenv("AGENT_LLM_ORDER", "gemini,groq,minimax").split(",")
+        if p.strip()
+    ] or ["gemini", "groq", "minimax"]
+    # AGENT_LLM_PROVIDER pins a SINGLE provider (no failover) so one can be A/B tested
+    # on real calls in isolation. It overrides AGENT_LLM_ORDER.
+    if _provider:
+        _order = [_provider]
+    _chain: list = []
+    _labels: list = []
+
+    def _add_gemini() -> None:
+        if not _gemini_key:
+            return
         # Google Gemini via its OpenAI-compatible endpoint. The free tier allows
         # ~250k tokens/min (vs Groq free's ~12k), so this agent's larger prompt +
         # tools + knowledge base does NOT exhaust the quota and go silent mid-call.
-        # Default to gemini-flash-latest: reliable + fast (~1.3s) tool-calling.
-        # (gemini-flash-lite-latest was intermittently HANGING server-side —
-        # requests timed out — which made the agent go silent mid-call.) Override
-        # via GEMINI_LLM_MODEL if you want a different model.
-        _gemini_model = os.getenv("GEMINI_LLM_MODEL", "gemini-flash-latest")
-        agent_llm = openai.LLM(
-            model=_gemini_model,
-            api_key=_gemini_key,
-            base_url=os.getenv(
-                "GEMINI_API_BASE",
-                "https://generativelanguage.googleapis.com/v1beta/openai/",
-            ),
-            temperature=0.3,
+        # gemini-flash-lite-latest: fastest option that is actually reliable here.
+        # Measured against this agent's real payload (~1.8k-token prompt + 6 tools),
+        # 6/6 successful streams at ~1.3s to first token, vs ~2.4s for
+        # gemini-flash-latest. It had hung server-side once before; a re-probe showed
+        # that was transient. gemini-2.0-flash / -flash-lite return 429 on this key,
+        # and Groq is faster still but its token-per-minute cap silences long calls.
+        # Override via GEMINI_LLM_MODEL.
+        _gemini_model = os.getenv("GEMINI_LLM_MODEL", "gemini-flash-lite-latest")
+        _gemini_base = os.getenv(
+            "GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta/openai/"
         )
-        logger.info(f"LLM = Gemini ({_gemini_model})")
-    elif _groq_key:
+        _chain.append(openai.LLM(
+            model=_gemini_model, api_key=_gemini_key, base_url=_gemini_base, temperature=0.3,
+        ))
+        _labels.append(f"gemini:{_gemini_model}")
+        # Optional second Gemini model. OFF by default: the `-latest` aliases both
+        # resolve to the same underlying model family on ONE project, so they share
+        # `generate_content_free_tier_requests` (limit 5/min on a free key — observed
+        # live). That is fake redundancy: when the primary 429s the second one 429s
+        # too, and it still burns an `attempt_timeout` slot of caller silence.
+        # Real redundancy comes from a DIFFERENT provider (Groq / MiniMax below).
+        # Set GEMINI_FALLBACK_MODEL only once the project is on a paid tier.
+        _gemini_fallback = os.getenv("GEMINI_FALLBACK_MODEL", "").strip()
+        if _gemini_fallback and _gemini_fallback != _gemini_model:
+            _chain.append(openai.LLM(
+                model=_gemini_fallback, api_key=_gemini_key, base_url=_gemini_base, temperature=0.3,
+            ))
+            _labels.append(f"gemini:{_gemini_fallback}")
+
+    def _add_groq() -> None:
+        if not _groq_key:
+            return
+        # _StrictSchemaLLM, not openai.LLM: Groq 400s on the `extra_content` property
+        # that LiveKit copies out of Gemini's replies into the shared chat context.
         _groq_model = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
-        agent_llm = openai.LLM(
+        _chain.append(_StrictSchemaLLM(
             model=_groq_model,
             api_key=_groq_key,
             base_url=os.getenv("GROQ_API_BASE", "https://api.groq.com/openai/v1"),
             temperature=0.3,
-        )
-        logger.info(f"LLM = Groq ({_groq_model})")
-    else:
-        agent_llm = openai.LLM(
-            model=os.getenv("MINIMAX_LLM_MODEL", "MiniMax-Text-01"),
-            api_key=os.getenv("MINIMAX_API_KEY"),
+        ))
+        _labels.append(f"groq:{_groq_model}")
+
+    def _add_minimax() -> None:
+        # MiniMax is kept in the chain whenever a key exists — not only when nothing
+        # else is configured. Its quota is separate from Gemini's and Groq's, so it is
+        # the only thing left when both of those are rate-limited at the same time
+        # (observed live: all 3 LLMs unavailable -> caller heard silence). Quality is
+        # worse (MiniMax-Text-01 sometimes writes tool calls as plain text), so keep it
+        # LAST in AGENT_LLM_ORDER; set AGENT_MINIMAX_LAST_RESORT=0 to drop it entirely.
+        _minimax_key = os.getenv("MINIMAX_API_KEY", "").strip()
+        if not _minimax_key:
+            return
+        if _chain and (
+            os.getenv("AGENT_MINIMAX_LAST_RESORT", "1").strip() == "0" or _provider
+        ):
+            return
+        _minimax_model = os.getenv("MINIMAX_LLM_MODEL", "MiniMax-Text-01")
+        _chain.append(_StrictSchemaLLM(
+            model=_minimax_model,
+            api_key=_minimax_key,
             base_url=os.getenv("MINIMAX_API_BASE", "https://api.minimax.io/v1"),
             temperature=0.3,
+        ))
+        _labels.append(f"minimax:{_minimax_model}")
+
+    _builders = {"gemini": _add_gemini, "groq": _add_groq, "minimax": _add_minimax}
+    for _name in _order:
+        _builder = _builders.get(_name)
+        if _builder is None:
+            logger.warning(f"AGENT_LLM_ORDER: unknown provider '{_name}' — ignored.")
+            continue
+        _builder()
+    if not _chain:
+        # Nothing matched (e.g. AGENT_LLM_ORDER typo'd, or no keys at all). Try every
+        # provider so the call still gets answered rather than failing outright.
+        for _builder in _builders.values():
+            _builder()
+
+    if len(_chain) > 1:
+        # Fail OVER instead of retrying a provider that is down. Without this, a 503
+        # from the primary meant ~23s of retries against the same dead model while the
+        # caller heard nothing and hung up (observed on a real call). max_retry_per_llm=0
+        # means "don't retry, move on"; attempt_timeout also catches a provider that
+        # accepts the request but never streams (the earlier flash-lite hang).
+        agent_llm = _lk_llm.FallbackAdapter(
+            _chain,
+            attempt_timeout=float(os.getenv("AGENT_LLM_ATTEMPT_TIMEOUT", "6") or "6"),
+            max_retry_per_llm=0,
         )
-        logger.info("LLM = MiniMax-Text-01 (set GEMINI_API_KEY or GROQ_API_KEY in .env)")
+        logger.info(f"LLM = {_labels[0]} (fallbacks: {', '.join(_labels[1:])})")
+    else:
+        agent_llm = _chain[0]
+        logger.info(f"LLM = {_labels[0]} (no fallback configured)")
 
     # Build the TTS engine up front so its HTTP/TLS connection to MiniMax can be
     # warmed in the background (task below) WHILE the session starts. The greeting
@@ -761,11 +1065,20 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         model=os.getenv("MINIMAX_TTS_MODEL", "speech-2.6-turbo"),
         voice=voice,
         language_boost=lang_boost,
+        # The PSTN leg is 8 kHz, so requesting 24 kHz meant synthesizing and streaming
+        # 3x the bytes only for them to be downsampled. 8 kHz gives faster first audio
+        # (and stops the "slow audio generation" emitter underruns) with no audible
+        # loss on a phone call. Raise it only if this agent ever serves web/WebRTC
+        # callers, where the extra bandwidth is actually heard.
+        sample_rate=int(os.getenv("MINIMAX_TTS_SAMPLE_RATE", "8000") or "8000"),
         # Clean, unclipped MiniMax volume (1.0); loudness comes from the downstream
         # tanh limiter (gain) so audio is loud but CLEAR.
         volume=float(os.getenv("MINIMAX_TTS_VOL", "1.0") or "1.0"),
         speed=float(os.getenv("MINIMAX_TTS_SPEED", "1.0") or "1.0"),
         gain=float(os.getenv("MINIMAX_TTS_GAIN", "2.0") or "2.0"),
+        # Emotional delivery, e.g. "happy" — makes speech-2.8 sound noticeably more
+        # human. Only sent when set (older TTS models don't support it).
+        emotion=os.getenv("MINIMAX_TTS_EMOTION", "").strip(),
     )
     # Kick off the connection warm-ups now (TTS + LLM), in parallel with the
     # session start below, so the greeting and the first user turn don't pay cold
@@ -815,6 +1128,44 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     session.on("metrics_collected", _on_metrics)
 
+    # Mirror the conversation into the call log so the dashboard can show a real
+    # transcript (Calls page + contact history). Fire-and-forget per turn.
+    def _on_conversation_item(ev):
+        item = getattr(ev, "item", None)
+        role = getattr(item, "role", None)
+        if role not in ("user", "assistant"):
+            return  # skip tool calls / handoffs — only spoken turns are useful here
+        text_content = (getattr(item, "text_content", None) or "").strip()
+        if not text_content:
+            return
+        _fire(_report("/api/calls/agent-call-transcript", {
+            "call_id": call_id,
+            "role": role,
+            "content": text_content,
+        }))
+
+    session.on("conversation_item_added", _on_conversation_item)
+
+    # Close the call out (status + duration) when the session ends. Registered as a
+    # shutdown callback as well as the session `close` event, because on Windows the
+    # native layer can panic during teardown and kill the process — whichever fires
+    # first wins, and the backend call is idempotent.
+    _ended = {"done": False}
+
+    async def _close_call_log(status: str = "completed"):
+        if _ended["done"]:
+            return
+        _ended["done"] = True
+        await _report("/api/calls/agent-call-end", {"call_id": call_id, "status": status})
+
+    def _on_session_close(ev):
+        reason = getattr(ev, "reason", None)
+        logger.info(f"Session closed (reason={reason}) — closing call log.")
+        _fire(_close_call_log("completed"))
+
+    session.on("close", _on_session_close)
+    ctx.add_shutdown_callback(lambda: _close_call_log("completed"))
+
     await session.start(
         VoxAgent(instructions=system_prompt, clinic_id=clinic_id, did=did,
                  booking_mode=(ctx_data.get("booking_mode") or "time")),
@@ -848,15 +1199,26 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     session.on("user_state_changed", _on_user_state_changed)
 
-    # Ensure the TTS connection warm-up (started above) has finished so the
-    # greeting plays right away instead of paying a cold handshake.
-    try:
-        await asyncio.wait_for(_tts_warm, timeout=3.0)
-    except Exception:
-        pass
+    # Ensure the TTS connection warm-up (started above) has finished so the greeting
+    # plays right away instead of paying a cold handshake. SKIPPED when the greeting
+    # audio is already cached: there is no MiniMax request to make, so waiting up to
+    # 3s here would only delay the caller hearing us.
+    if not tts_engine.has_cached(greeting):
+        try:
+            await asyncio.wait_for(_tts_warm, timeout=3.0)
+        except Exception:
+            pass
+    else:
+        logger.info("Greeting already cached — skipping TTS warm-up wait.")
 
-    # Speak the opening greeting once connected.
-    await session.say(greeting, allow_interruptions=True)
+    # Speak the opening greeting once connected. Guarded: if the caller hangs up
+    # while the session is still starting, session.say raises "AgentSession isn't
+    # running". Unguarded that became an UNHANDLED exception which crashed the job
+    # (and, with the Windows recycle, killed the worker) on every early hang-up.
+    try:
+        await session.say(greeting, allow_interruptions=True)
+    except Exception as e:
+        logger.warning(f"Greeting not played — caller likely disconnected early: {e}")
 
 
 if __name__ == "__main__":
@@ -865,7 +1227,12 @@ if __name__ == "__main__":
             entrypoint_fnc=entrypoint,
             prewarm_fnc=prewarm,
             # Explicit agent name so a LiveKit SIP dispatch rule can target it.
-            agent_name="voxpilot-inbound",
+            # WARNING: this string must match `agent_name` on the LiveKit SIP
+            # dispatch rule exactly, or LiveKit has nothing to hand the call to and
+            # every inbound call goes unanswered. Changing it means updating the
+            # dispatch rule in LiveKit at the same time (see docs/DEPLOYMENT.md).
+            # Override per-environment via AGENT_NAME.
+            agent_name=os.getenv("AGENT_NAME", "clarivo-inbound"),
             # Keep a job process pre-warmed so an incoming call doesn't wait for a
             # fresh one to spin up (the "no warmed process available" gap before the
             # greeting). Tune via AGENT_IDLE_PROCESSES.

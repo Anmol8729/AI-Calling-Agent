@@ -77,7 +77,7 @@ async def notify_new_appointment(clinic_id, patient_name, when, reason):
             f"Name:   {patient_name or '-'}\n"
             f"When:   {when or '-'}\n"
             f"Reason: {reason or '-'}\n\n"
-            f"— {business or 'VoxPilot AI'}"
+            f"— {business or 'Clarivo'}"
         )
         for email in recipients:
             try:

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Activity, CalendarCheck, CheckCircle2, Circle, PhoneCall, PhoneForwarded, Target, Timer, TrendingUp, Users } from "lucide-react";
+import { Activity, CalendarCheck, CheckCircle2, Circle, PhoneCall, Target, Timer, TrendingUp, Users } from "lucide-react";
 import api from "../lib/api";
 import { useLabels } from "../store/clinicStore";
 import ChartCard from "../components/ChartCard";
@@ -114,12 +114,14 @@ export default function Dashboard() {
         </section>
       )}
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <StatCard title="Total Calls" value={loading ? "…" : (totals.calls ?? 0)} icon={PhoneCall} />
-        <StatCard title="Calls Today" value={loading ? "…" : (calls.today ?? 0)} icon={Activity} tone="light" />
-        <StatCard title={labels.bookings} value={loading ? "…" : (totals.appointments ?? 0)} icon={CalendarCheck} tone="light" />
-        <StatCard title={labels.contacts} value={loading ? "…" : (totals.contacts ?? 0)} icon={Users} tone="light" />
-        <StatCard title="Avg Duration" value={loading ? "…" : fmtDuration(calls.avgDurationSec)} icon={Timer} tone="light" />
+      {/* 5 cards: 2-up on small, 3-up on md (so the last row holds 2, not 1),
+          then 5-up on xl. Avoids a single orphaned card at tablet widths. */}
+      <section className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
+        <StatCard title="Total calls" value={totals.calls ?? 0} icon={PhoneCall} loading={loading} />
+        <StatCard title="Calls today" value={calls.today ?? 0} icon={Activity} tone="light" loading={loading} />
+        <StatCard title={labels.bookings} value={totals.appointments ?? 0} icon={CalendarCheck} tone="light" loading={loading} />
+        <StatCard title={labels.contacts} value={totals.contacts ?? 0} icon={Users} tone="light" loading={loading} />
+        <StatCard title="Avg duration" value={fmtDuration(calls.avgDurationSec)} icon={Timer} tone="light" loading={loading} />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-3">
@@ -137,7 +139,9 @@ export default function Dashboard() {
 
         <ChartCard title="Call outcomes" description="Distribution by status">
           {outcomes.length === 0 ? (
-            <div className="grid h-full place-items-center text-sm text-gray-400">No call data yet</div>
+            <div className="grid h-full place-items-center px-6 text-center text-sm text-gray-400">
+              This fills in once your assistant starts taking calls.
+            </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -155,7 +159,11 @@ export default function Dashboard() {
         <ChartCard title="Calls this week" description="Total received in the last 7 days">
           <div className="grid h-full place-items-center">
             <div className="text-center">
-              <p className="text-6xl font-semibold tracking-tight text-gray-950">{loading ? "…" : (calls.last7Days ?? 0)}</p>
+              {loading ? (
+                <div className="mx-auto h-14 w-24 animate-pulse rounded-xl bg-gray-200/80" aria-hidden="true" />
+              ) : (
+                <p className="text-6xl font-semibold tracking-tight text-gray-950">{calls.last7Days ?? 0}</p>
+              )}
               <p className="mt-2 text-sm text-gray-500">{calls.active ?? 0} active right now</p>
             </div>
           </div>
@@ -169,13 +177,15 @@ export default function Dashboard() {
           <p className="text-sm text-gray-500">Last {f.periodDays ?? 30} days</p>
         </div>
         <div className="grid gap-4 sm:grid-cols-3">
-          <StatCard title="Answer rate" value={loading ? "…" : `${f.answerRate ?? 0}%`} icon={Target} tone="light" />
-          <StatCard title="Booking conversion" value={loading ? "…" : `${f.conversionRate ?? 0}%`} icon={TrendingUp} tone="light" />
-          <StatCard title="Transfer rate" value={loading ? "…" : `${f.transferRate ?? 0}%`} icon={PhoneForwarded} tone="light" />
+          <StatCard title="Answer rate" value={`${f.answerRate ?? 0}%`} icon={Target} tone="light" loading={loading} />
+          <StatCard title="Booking conversion" value={`${f.conversionRate ?? 0}%`} icon={TrendingUp} tone="light" loading={loading} />
+          <StatCard title="Calls answered" value={nf.format(f.answered ?? 0)} icon={PhoneCall} tone="light" loading={loading} />
         </div>
         <div className="panel rounded-3xl p-6">
           {(f.calls ?? 0) === 0 ? (
-            <div className="grid place-items-center py-8 text-sm text-gray-400">No call data in this period yet</div>
+            <div className="grid place-items-center py-8 text-center text-sm text-gray-400">
+              No calls in the last {f.periodDays ?? 30} days yet — your funnel appears here after the first call.
+            </div>
           ) : (
             <div className="space-y-4">
               {stages.map((s, i) => (
@@ -190,7 +200,7 @@ export default function Dashboard() {
                 </div>
               ))}
               <p className="pt-1 text-xs text-gray-400">
-                {nf.format(f.leads ?? 0)} {labels.contacts.toLowerCase()} captured · {nf.format(f.transferred ?? 0)} transferred to a human
+                {nf.format(f.leads ?? 0)} {labels.contacts.toLowerCase()} captured
               </p>
             </div>
           )}
@@ -199,7 +209,14 @@ export default function Dashboard() {
 
       <section className="space-y-4">
         <h2 className="text-lg font-semibold text-gray-950">Recent calls</h2>
-        <DataTable columns={columns} rows={recent} loading={loading} emptyTitle="No calls yet" />
+        <DataTable
+          columns={columns}
+          rows={recent}
+          loading={loading}
+          emptyTitle="No calls yet"
+          emptyDescription="Every call your assistant answers will appear here, with who called and what happened."
+          emptyIcon={PhoneCall}
+        />
       </section>
     </div>
   );

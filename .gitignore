@@ -28,3 +28,6 @@ yarn-error.log*
 
 # Runtime logs
 *.log
+
+# Cached TTS audio (regenerated on demand; see AGENT_TTS_CACHE_DIR)
+agent/.tts_cache/

@@ -1,6 +1,6 @@
-# VoxPilot AI - Multi-Tenant AI Medical Receptionist SaaS 📞🩺
+# Clarivo - Multi-Tenant AI Medical Receptionist SaaS 📞🩺
 
-VoxPilot AI is a production-ready, multi-tenant conversational voice agent SaaS designed specifically for medical practices, clinics, hospitals, dentists, and labs. By leveraging advanced Large Language Models (LLMs), Voice Activity Detection (VAD), and low-latency VoIP integrations, VoxPilot AI handles incoming patient calls, schedules appointments, logs patient interactions directly into a CRM, sends pill reminders, and redirects calls to human staff when necessary.
+Clarivo is a production-ready, multi-tenant conversational voice agent SaaS designed specifically for medical practices, clinics, hospitals, dentists, and labs. By leveraging advanced Large Language Models (LLMs), Voice Activity Detection (VAD), and low-latency VoIP integrations, Clarivo handles incoming patient calls, schedules appointments, logs patient interactions directly into a CRM, sends pill reminders, and redirects calls to human staff when necessary.
 
 ---
 

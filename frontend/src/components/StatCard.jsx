@@ -1,6 +1,6 @@
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 
-export default function StatCard({ title, value, change, icon: Icon, tone = "dark" }) {
+export default function StatCard({ title, value, change, icon: Icon, tone = "dark", loading = false }) {
   const positive = !String(change).startsWith("-");
   const dark = tone === "dark";
 
@@ -9,7 +9,15 @@ export default function StatCard({ title, value, change, icon: Icon, tone = "dar
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className={`text-sm ${dark ? "text-gray-400" : "text-gray-500"}`}>{title}</p>
-          <p className={`mt-3 text-3xl font-semibold tracking-tight ${dark ? "text-white" : "text-gray-950"}`}>{value}</p>
+          {/* A shimmer reads as "loading"; a bare "…" reads as broken. */}
+          {loading ? (
+            <div
+              className={`mt-3 h-9 w-20 animate-pulse rounded-lg ${dark ? "bg-white/15" : "bg-gray-200/80"}`}
+              aria-hidden="true"
+            />
+          ) : (
+            <p className={`mt-3 text-3xl font-semibold tracking-tight ${dark ? "text-white" : "text-gray-950"}`}>{value}</p>
+          )}
         </div>
         <div className={`grid h-11 w-11 place-items-center rounded-2xl ${dark ? "bg-white/10 text-white" : "bg-gray-100 text-gray-950"}`}>
           <Icon className="h-5 w-5" />

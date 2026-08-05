@@ -14,7 +14,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,9 +22,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.services.db import get_db
 from backend.routes.auth import require_superadmin
 from backend.services.plans import list_plans, get_plan, effective_call_limit, is_valid_plan
-from backend.services import diagnostics
-from backend.models import Tenant, CallLog, User, UpgradeRequest
-from backend.utils.helpers import api_response, to_uuid
+from backend.services import diagnostics, audit, billing_period
+from backend.models import Tenant, CallLog, User, UpgradeRequest, AuditLog
+from backend.utils.helpers import api_response, to_uuid, serialize_models
 
 logger = logging.getLogger("admin-router")
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -36,6 +36,9 @@ class TenantPlanUpdate(BaseModel):
     # Custom monthly allowance override. Send a positive int to set, or 0/null
     # to clear the override (fall back to the plan default). Omit to leave as-is.
     monthly_call_limit: Optional[int] = Field(default=None, ge=0)
+    # Custom cap on claimable phone numbers, same convention as above. Each DID is
+    # a recurring cost, so raising this is a deliberate commercial decision.
+    number_limit: Optional[int] = Field(default=None, ge=0)
 
 
 def _tenant_view(t: Tenant, used: int) -> dict:
@@ -54,8 +57,10 @@ def _tenant_view(t: Tenant, used: int) -> dict:
 
 
 async def _month_usage_map(db: AsyncSession) -> dict:
-    now = datetime.utcnow()
-    month_start = datetime(now.year, now.month, 1)
+    # Anchored to the BILLING timezone, not UTC. Anchoring to UTC put the first
+    # 5h30m of every month into the month that had already closed (see
+    # services/billing_period.py).
+    month_start = billing_period.month_start_utc()
     rows = (await db.execute(
         select(CallLog.clinic_id, func.count())
         .where(CallLog.created_at >= month_start, CallLog.clinic_id.isnot(None))
@@ -76,6 +81,40 @@ async def admin_diagnostics(
 ):
     """Readiness check for each integration (DB, Deepgram, MiniMax, Vobiz, WhatsApp, email)."""
     return api_response(success=True, message="Diagnostics", data=await diagnostics.run_all(db))
+
+
+@router.get("/audit-logs")
+async def admin_audit_logs(
+    clinic_id: Optional[str] = None,
+    action: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    current_user: dict = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Platform-wide audit trail, newest first. Optionally filtered.
+
+    Superadmin-only and read-only. Rows are never updated or deleted through the
+    app, so this is the authoritative record of who did what.
+    """
+    stmt = select(AuditLog).order_by(AuditLog.created_at.desc())
+    if clinic_id:
+        cid = to_uuid(clinic_id)
+        if cid is None:
+            return api_response(success=False, message="Invalid clinic id", status_code=400)
+        stmt = stmt.where(AuditLog.clinic_id == cid)
+    if action:
+        stmt = stmt.where(AuditLog.action == action.strip())
+    # Bounded so a large trail cannot be pulled in one request.
+    capped = max(min(int(limit), 200), 1)
+    rows = (await db.execute(stmt.limit(capped).offset(max(int(offset), 0)))).scalars().all()
+    total = (await db.execute(select(func.count()).select_from(AuditLog))).scalar() or 0
+    return api_response(success=True, message="Audit logs fetched", data={
+        "items": serialize_models(rows),
+        "total": int(total),
+        "limit": capped,
+        "offset": max(int(offset), 0),
+    })
 
 
 @router.get("/tenants")
@@ -104,6 +143,7 @@ async def list_tenants(
 async def set_tenant_plan(
     tenant_id: str,
     payload: TenantPlanUpdate,
+    request: Request,
     current_user: dict = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -115,7 +155,15 @@ async def set_tenant_plan(
     if tenant is None:
         return api_response(success=False, message="Tenant not found", status_code=404)
 
-    data = payload.dict(exclude_unset=True)
+    # Captured before mutation so the audit row shows what actually changed.
+    before = {
+        "subscription": tenant.subscription,
+        "monthly_call_limit": tenant.monthly_call_limit,
+        "number_limit": getattr(tenant, "number_limit", None),
+    }
+
+    # model_dump, not the deprecated Pydantic v1 .dict().
+    data = payload.model_dump(exclude_unset=True)
     if "subscription" in data:
         key = (data["subscription"] or "").strip().lower()
         if not is_valid_plan(key):
@@ -124,12 +172,14 @@ async def set_tenant_plan(
     if "monthly_call_limit" in data:
         val = data["monthly_call_limit"]
         tenant.monthly_call_limit = int(val) if (val and val > 0) else None
+    if "number_limit" in data:
+        val = data["number_limit"]
+        tenant.number_limit = int(val) if (val and val > 0) else None
 
     await db.commit()
     await db.refresh(tenant)
 
-    now = datetime.utcnow()
-    month_start = datetime(now.year, now.month, 1)
+    month_start = billing_period.month_start_utc()
     used = (await db.execute(
         select(func.count()).select_from(CallLog).where(
             CallLog.clinic_id == tid, CallLog.created_at >= month_start
@@ -138,6 +188,22 @@ async def set_tenant_plan(
 
     logger.info(f"Super-admin {current_user.get('email')} updated tenant {tid} plan -> "
                 f"{tenant.subscription}, custom_limit={tenant.monthly_call_limit}")
+    # A platform admin changing what a customer is entitled to (and billed for) is
+    # exactly the kind of action that must be attributable after the fact.
+    await audit.record(
+        audit.ADMIN_PLAN_CHANGED, actor=current_user, clinic_id=tid,
+        target_type="tenant", target_id=tid,
+        detail={
+            "before": before,
+            "after": {
+                "subscription": tenant.subscription,
+                "monthly_call_limit": tenant.monthly_call_limit,
+                "number_limit": getattr(tenant, "number_limit", None),
+            },
+            "tenant_name": tenant.name,
+        },
+        request=request,
+    )
     return api_response(success=True, message="Plan updated", data=_tenant_view(tenant, used))
 
 

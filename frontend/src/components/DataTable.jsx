@@ -1,13 +1,29 @@
 import EmptyState from "./EmptyState";
 import LoadingState from "./LoadingState";
 
-export default function DataTable({ columns, rows, loading = false, emptyTitle = "No records found" }) {
+export default function DataTable({
+  columns,
+  rows,
+  loading = false,
+  emptyTitle = "No records found",
+  // Forwarded to EmptyState so each table can explain itself and offer a next step.
+  emptyDescription,
+  emptyIcon,
+  emptyAction,
+}) {
   if (loading) {
     return <LoadingState />;
   }
 
   if (!rows.length) {
-    return <EmptyState title={emptyTitle} />;
+    return (
+      <EmptyState
+        title={emptyTitle}
+        {...(emptyDescription ? { description: emptyDescription } : {})}
+        {...(emptyIcon ? { icon: emptyIcon } : {})}
+        action={emptyAction}
+      />
+    );
   }
 
   return (

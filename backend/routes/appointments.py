@@ -66,8 +66,16 @@ async def create_appointment(
 
     phone = (payload.phone or "").strip() or None
 
+    # Same clinic lock the AI booking path takes. Both write to `appointments`, so
+    # locking only one of them would still leave a race between a staff member
+    # booking on the dashboard and the agent booking on a call at the same instant.
+    # Transaction-scoped: released on commit, and safe behind the connection pooler.
+    await repository.lock_clinic_for_booking(db, clinic_id)
+
     if booking_mode == "token":
-        # Assign today's next sequential token. No time, no conflict check.
+        # Assign today's next sequential token. Under the lock above, so two
+        # simultaneous bookings cannot read the same maximum and be handed the same
+        # token number.
         today = repository.queue_today_str()
         token_num = await repository.next_token(clinic_id, today)
         display = payload.appointment_date or f"Token {token_num}"
@@ -110,10 +118,12 @@ async def create_appointment(
         )
 
     # ----- time mode (default) -----
-    # Prevent double-booking: same clinic, overlapping scheduled slot.
+    # Prevent double-booking: same clinic, overlapping scheduled slot. Checked in
+    # THIS transaction, under the clinic lock, so the check and the insert cannot be
+    # interleaved with another booking.
     if payload.appointment_at is not None:
-        available = await repository.is_slot_available(
-            clinic_id, payload.appointment_at, payload.duration_min
+        available = await repository.is_slot_free_in_session(
+            db, clinic_id, payload.appointment_at, payload.duration_min
         )
         if not available:
             return api_response(

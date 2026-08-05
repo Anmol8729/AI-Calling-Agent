@@ -20,7 +20,7 @@ def send_email(to: str, subject: str, body: str) -> bool:
         return False
     try:
         msg = EmailMessage()
-        msg["From"] = settings.SMTP_FROM or settings.SMTP_USER or "no-reply@voxpilot.ai"
+        msg["From"] = settings.SMTP_FROM or settings.SMTP_USER or "no-reply@clarivo.ai"
         msg["To"] = to
         msg["Subject"] = subject
         msg.set_content(body)
