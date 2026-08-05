@@ -7,8 +7,20 @@
 > secrets-in-image · security headers · `/health` · prod config fail-fast ·
 > **C2** agent per-call token scoping · **C3** session revocation ·
 > **C1** removal of the unauthenticated `/media-stream` pipeline.
-> Still open there: **C4** RBAC (waiting on the teammate's Staff Panel), **C5**
-> rotate `JWT_SECRET` (owner, doing last), **C6** Redis/compose, and H2-H12.
+> Still open there: **C5** rotate `JWT_SECRET` (owner, doing last) and H2-H12.
+> **C6** Redis/compose is done (config verified; `docker build` still never run).
+> **C4** RBAC is now **PARTIAL** — the teammate's Staff Panel is merged, so the
+> doctor/staff boundary exists and is enforced server-side; the permissions model
+> (`roles`, `permissions`, `tenants.status`, `platform_admins`) is still TODO.
+
+## Staff role boundary — the rule to keep
+
+`StaffRoute.jsx` and the nav gating only *hide* things. **Every staff restriction
+must also be enforced on the endpoint**, via `Depends(require_non_staff)`. Currently
+non-staff-only: `PUT /api/clinics/settings` and
+`POST /api/billing/{upgrade-request,checkout,verify}`. Staff *may* read and create
+patients (walk-ins) and may book appointments — that is intended, not an oversight.
+If you add a doctor-only screen, add the dependency in the same commit as the UI.
 
 Gate to run **before sending the product to any real client**. Everything below was
 established by testing against the live system, not assumed. Items marked ✅ are
@@ -30,6 +42,14 @@ Still do these:
 - Set a strong **JWT_SECRET** (see next section):
   `python -c "import secrets; print(secrets.token_urlsafe(48))"`
 - Never put real values in `.env.example` again — it is a tracked template.
+- **Rotate the Google OAuth client secret** (`GOCSPX-…`) — it was visible in a
+  screenshot shared outside the team. Rotate in Google Cloud Console, then update it
+  in the Supabase Auth Google provider settings.
+- **Run `alembic upgrade head` on every environment**, not just this machine. The
+  Staff Panel's `patients.source` / `patients.created_by` columns only exist as of
+  migration `e490979d4cb1`; `schema.sql` is never executed by the app and
+  `create_all` does not `ALTER`, so an un-migrated DB fails on the first
+  agent-booked patient.
 
 Before any push, re-run a secret scan over what would actually be committed:
 `git ls-files --cached --others --exclude-standard` then grep those files for
@@ -161,7 +181,9 @@ ngrok http 127.0.0.1:8000
 ```
 
 Checks: `npm run build` + `npm run lint` (expect 0 / 0) ·
-`python -c "import backend.app"` · `pytest backend/tests` (expect 11 passed) ·
+`python -c "import backend.app"` · `pytest backend/tests` (expect **124 passed**) ·
+`alembic current` (expect `e490979d4cb1 (head)`) + `alembic check`
+(expect "No new upgrade operations detected") ·
 backend `GET /health` should return 200 with `"database": "ok"` (plain `GET /`
 never touches the DB, so it can look healthy while the DB is down) ·
 agent log should show `registered worker` with `agent_name: clarivo-inbound`.

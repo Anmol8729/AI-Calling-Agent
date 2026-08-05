@@ -15,7 +15,7 @@ something external · `WONTFIX` deliberate, with reason.
 | Decision | Detail |
 |---|---|
 | `JWT_SECRET` rotation | Owner will rotate **last**, after the code work. Currently only 19 chars. Rotating logs everyone out — do it in a maintenance window. |
-| C4 (RBAC redesign) | **Deferred** until the teammate pushes the Staff Panel. It changes `users` schema + role names, so it must not land first. |
+| C4 (RBAC redesign) | **Deferred** until the teammate pushes the Staff Panel. It changes `users` schema + role names, so it must not land first. → Teammate pushed on 2026-06-29; merged (see "Staff Panel merge" below). C4 is now **PARTIAL**, not blocked. |
 | Work order | C2 → C3 → C1. |
 
 ---
@@ -132,16 +132,65 @@ and `appointments(clinic_id, appointment_at)`, which are the shapes every dashbo
 query actually uses.
 
 ### C4 — RBAC hierarchy does not exist
-**Status: BLOCKED** — waiting on the teammate's Staff Panel push (owner's call).
+**Status: PARTIAL** — the teammate's Staff Panel landed one real role boundary
+(doctor vs staff). The full permissions model is still TODO.
 
-`require_roles` is defined at `backend/routes/auth.py` and **never called once**.
-Roles in the DB are `doctor` / `admin` / `receptionist`, not
-Super Admin → Company Admin → Staff. No permissions model, no staff endpoints, no
-invite flow, and no `is_active` on tenants, so "suspend a company" is impossible.
+Originally: `require_roles` was defined at `backend/routes/auth.py` and **never
+called once**. Roles in the DB were `doctor` / `admin` / `receptionist`, with no
+permissions model, no staff endpoints, no invite flow, and no `is_active` on
+tenants, so "suspend a company" was impossible.
 
-Planned: `roles`, `permissions`, `role_permissions`, `user_permissions`,
-`tenants.status`, a real `platform_admins` table replacing the email allowlist,
-then a `require_permission(...)` dependency across all 57 endpoints.
+**Delivered by the merge (2026-06-29):**
+* `POST /auth/staff` — a doctor can create a `staff` login inside their own clinic.
+  `role` is hardcoded and `clinic_id` is taken from the caller, never the payload,
+  so it cannot mint an admin or cross into another tenant.
+* `require_roles(["doctor"])` is now actually called, plus a new
+  `require_non_staff` dependency.
+* `frontend/src/components/StaffRoute.jsx` + nav gating hide billing/setup from staff.
+* Staff can read patients and create them (walk-ins) but cannot edit or delete.
+
+**Still TODO for full C4:** `roles`, `permissions`, `role_permissions`,
+`user_permissions`, `tenants.status`, a real `platform_admins` table replacing the
+email allowlist, then a `require_permission(...)` dependency across all endpoints.
+
+#### Staff Panel merge — what had to be fixed on the way in
+
+The teammate's branch was merged as `--no-ff` into `security-hardening`. Four files
+conflicted (`backend/routes/auth.py`, `docker-compose.yml`, `frontend/src/main.jsx`,
+`frontend/src/pages/Account.jsx`); all were resolved keeping both sides. Five real
+defects were found in the merged result and fixed — record them so they are not
+reintroduced:
+
+1. **Password-policy bypass.** `StaffCreate.password` was `Field(..., min_length=6)`,
+   which accepted `123456` for a login into a tenant's patient data — the one place
+   in the codebase that skipped the 10-char/3-class/blocklist policy. Now uses
+   `MIN_PASSWORD_LENGTH` + `validate_password_strength`.
+2. **UI-only access control.** `StaffRoute` merely *hid* menu items, so a staff token
+   could still call `PUT /api/clinics/settings` (AI prompt, knowledge base, WhatsApp
+   token) and `POST /api/billing/{upgrade-request,checkout,verify}` directly. Added
+   `Depends(require_non_staff)` to all four. A hidden menu item is not access control.
+   Appointments were deliberately **not** restricted — the UI does not hide them from
+   staff, so a receptionist booking appointments is the intended behaviour.
+3. **Missing migration.** `patients.source` and `patients.created_by` were added to
+   `backend/db/schema.sql` and the model but had **no Alembic migration**.
+   `schema.sql` is not executed by the app and `create_all` does not `ALTER`, so the
+   columns were absent from the live DB while `repository.py` already wrote
+   `source="agent"` — every agent-booked patient would have failed with
+   `column "source" of relation "patients" does not exist`. Fixed by migration
+   `e490979d4cb1`, with `server_default=text("'agent'")` because the table was
+   already populated. **Run `alembic upgrade head` on every other environment.**
+4. **Un-auditable, un-rate-limited staff creation.** Added
+   `audit.record("auth.staff_created", ...)` and `@limiter.limit("10/minute")`.
+5. **Dead code.** Removed an unused `isStaff` (and its now-unused `useAuthStore`
+   import) from `frontend/src/pages/Contacts.jsx` — that page has no edit/delete
+   controls to gate, so the correct fix was deletion, not silencing the lint warning.
+
+`docker-compose.yml`: their local `postgres` service was kept but put behind a
+`local-db` profile, bound to `127.0.0.1:5432` instead of all interfaces, and given
+its own `LOCAL_DB_USER/PASSWORD/NAME` rather than reusing `DB_*` — otherwise the
+Supabase production password would be fed into a container and be readable via
+`docker inspect`, and a weak-default Postgres would sit exposed on every interface
+(the exact problem C6 fixed for Redis).
 
 ### C5 — `JWT_SECRET` is only 19 characters
 **Status: BLOCKED** — owner rotating last, on purpose.
@@ -575,7 +624,7 @@ twelve HIGH items plus five MEDIUM ones. Nothing exploitable is knowingly left.
 
 | ID | What | Who |
 |---|---|---|
-| C4 | RBAC hierarchy (Super Admin → Company Admin → Staff) | waiting on the teammate's Staff Panel push |
+| C4 | RBAC hierarchy — **partial**: doctor/staff boundary merged and hardened; permissions model (`roles`, `permissions`, `tenants.status`, `platform_admins`) still TODO | us |
 | C5 | Rotate `JWT_SECRET` — currently 19 characters | owner, doing last |
 | H12 | Agent on Linux + a stable HTTPS domain instead of ngrok; test 2 clients concurrently | infra |
 | H11 | Set plan prices so checkout works | pricing decision |
@@ -629,8 +678,37 @@ Caveat from that same call: it is stored as `status: active, duration: 0s` becau
 the Windows teardown panic killed the worker before `agent-call-end` fired. That is
 **H13**, not a token problem.
 
+### Verification snapshot (2026-06-29 — after the Staff Panel merge)
+
+Branch `security-hardening` @ `63b0620`, working tree clean.
+
+| Check | Result |
+|---|---|
+| `pytest backend/tests` | **124 passed** |
+| `alembic current` | `e490979d4cb1 (head)` |
+| `alembic check` | No new upgrade operations detected |
+| Migration reversibility | `upgrade → downgrade → upgrade` verified on `e490979d4cb1` |
+| `patients.source` backfill | 3 existing rows set to `agent`, 0 NULL |
+| `GET /health` | 200, `database: ok` |
+| Dashboard (`127.0.0.1:3000`) | 200 |
+| Frontend build / lint | 0 errors / 0 problems; initial bundle 103.57 KB gzip (unchanged) |
+| Staff RBAC end-to-end | 16/16 live checks pass against the running API |
+| Google sign-in | **confirmed working live** — account created, `is_active=true`, `password_hash` NULL, avatar + `email_verified_at` set, audit row `auth.login {provider: google}` |
+| Temporary `_*.py` scripts | none left (`backend/tests/_assert_suite_size.py` is a deliberate, committed CI guard, not a probe) |
+
+Migration chain is `0001_baseline → 2c2168e1d70e → 3a7f91c4e2b8 → e490979d4cb1`.
+
+**Nothing has been pushed.** The merge lives on the local branch
+`security-hardening`; `main` is still at `2aabe53` as an untouched fallback.
+
 ### Temporary scripts
 
 All `_*.py` probes used for the above were deleted after use, and every synthetic
 row they created (`call_AAA`, `_c1probe_*`, the throwaway user + its tenant) was
 removed and the removal confirmed. No test data is left in the client database.
+
+Also purged after the merge pass: the tenant-isolation probe tenants
+("Isolation Clinic a/b") and their `_isoa_*` / `_isob_*@clarivo-probe.dev` users.
+That suite used to claim fixed phone numbers and release them only on teardown, so
+an interrupted run poisoned every later run; it now releases at setup **and**
+teardown (verified repeatable across two consecutive runs).
