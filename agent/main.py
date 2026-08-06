@@ -954,17 +954,46 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     ] or ["gemini", "groq", "minimax"]
     # AGENT_LLM_PROVIDER pins a SINGLE provider (no failover) so one can be A/B tested
     # on real calls in isolation. It overrides AGENT_LLM_ORDER.
+    #
+    # This is a DIAGNOSTIC setting and it is dangerous to leave on. Pinned means the
+    # FallbackAdapter is never built, so the moment that one provider rate-limits or
+    # times out the caller hears silence — there is nothing behind it. Observed live
+    # with AGENT_LLM_PROVIDER=gemini on a free key: `generate_content_free_tier_requests,
+    # limit: 5` per MINUTE, and a call spends 1-2 requests per turn, so the agent went
+    # quiet after roughly three turns. Note that is a REQUEST-count cap, separate from
+    # the token-per-minute allowance mentioned in _add_gemini below — the request cap
+    # is the one that bites.
+    #
+    # So: warn every time, and refuse outright in production. The backend's
+    # check_production_config() blocks boot on the same setting, which catches it
+    # before a single call arrives instead of after a client complains.
     if _provider:
         _order = [_provider]
+        _env = (os.getenv("ENV", "") or "").strip().lower()
+        _msg = (
+            f"AGENT_LLM_PROVIDER={_provider} pins ONE provider and DISABLES failover. "
+            "If it rate-limits or stalls, the caller hears silence. Unset it (or use "
+            "AGENT_LLM_ORDER=groq,gemini,minimax) for anything other than A/B testing."
+        )
+        if _env in ("production", "prod"):
+            raise RuntimeError(f"Refusing to serve calls in production: {_msg}")
+        logger.warning(_msg)
     _chain: list = []
     _labels: list = []
 
     def _add_gemini() -> None:
         if not _gemini_key:
             return
-        # Google Gemini via its OpenAI-compatible endpoint. The free tier allows
-        # ~250k tokens/min (vs Groq free's ~12k), so this agent's larger prompt +
-        # tools + knowledge base does NOT exhaust the quota and go silent mid-call.
+        # Google Gemini via its OpenAI-compatible endpoint. Its free tier is generous
+        # on TOKENS (~250k/min vs Groq free's ~12k), so the large prompt + tools +
+        # knowledge base does not blow the token budget.
+        #
+        # But there is a SECOND, separate free-tier cap that does bite:
+        # `generate_content_free_tier_requests, limit: 5` per minute — a REQUEST count.
+        # A call spends 1-2 requests per turn, so Gemini alone runs dry after roughly
+        # three turns and the caller hears silence. That is why Gemini must not be the
+        # only provider on a free key: keep Groq and MiniMax behind it (they have
+        # independent quotas), or enable billing on the Google project.
         # gemini-flash-lite-latest: fastest option that is actually reliable here.
         # Measured against this agent's real payload (~1.8k-token prompt + 6 tools),
         # 6/6 successful streams at ~1.3s to first token, vs ~2.4s for
@@ -1058,6 +1087,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         logger.info(f"LLM = {_labels[0]} (fallbacks: {', '.join(_labels[1:])})")
     else:
         agent_llm = _chain[0]
+        # Previously this branch logged nothing at all, so a single-provider setup was
+        # invisible in the log — the one case where you most need to know what is
+        # serving the call, because there is no safety net behind it.
+        logger.warning(f"LLM = {_labels[0]} (NO FALLBACK — a single failure goes silent)")
         logger.info(f"LLM = {_labels[0]} (no fallback configured)")
 
     # Build the TTS engine up front so its HTTP/TLS connection to MiniMax can be

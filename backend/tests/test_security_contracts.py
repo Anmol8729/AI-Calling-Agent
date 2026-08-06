@@ -481,6 +481,42 @@ class TestProductionConfigGuard:
 
         assert "JWT_SECRET" in self._problems(monkeypatch, JWT_SECRET=INSECURE_JWT_DEFAULT)
 
+    def test_pinning_the_agent_to_one_llm_blocks_a_production_boot(self, monkeypatch):
+        """AGENT_LLM_PROVIDER pins a single model and skips the FallbackAdapter, so a
+        rate limit or stall means the caller hears silence with nothing behind it. It
+        is an A/B-testing switch. Seen live on a free Gemini key: 5 requests/minute,
+        exhausted after ~3 turns of one call."""
+        monkeypatch.setenv("AGENT_LLM_PROVIDER", "gemini")
+        assert "AGENT_LLM_PROVIDER" in self._problems(monkeypatch)
+
+        monkeypatch.delenv("AGENT_LLM_PROVIDER", raising=False)
+        assert "AGENT_LLM_PROVIDER" not in self._problems(monkeypatch)
+
+    def test_an_ngrok_webhook_target_blocks_a_production_boot(self, monkeypatch):
+        """Vobiz posts call webhooks to SERVER_URL. A dev tunnel means inbound calls
+        depend on one laptop staying up, and the hostname moves on a free plan."""
+        monkeypatch.setenv("SERVER_URL", "https://polio-ribcage-crate.ngrok-free.dev")
+        assert "ngrok" in self._problems(monkeypatch)
+
+        monkeypatch.setenv("SERVER_URL", "https://api.clarivo.ai")
+        assert "ngrok" not in self._problems(monkeypatch)
+
+    def test_the_agent_refuses_to_serve_calls_with_a_pinned_llm_in_production(self):
+        """The backend guard stops the deployment, but the agent is a separate process
+        that could be started on its own — so it has to refuse too, not just warn."""
+        import inspect
+
+        import pathlib
+
+        source = (
+            pathlib.Path(__file__).resolve().parents[2] / "agent" / "main.py"
+        ).read_text(encoding="utf-8")
+        assert "Refusing to serve calls in production" in source
+        # And the single-provider case must be visible in the log at all; it used to
+        # log nothing, which hid the riskiest configuration.
+        assert "NO FALLBACK" in source
+        del inspect
+
     def test_a_short_secret_is_caught(self, monkeypatch):
         assert "JWT_SECRET" in self._problems(monkeypatch, JWT_SECRET="tooshort")
 

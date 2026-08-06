@@ -6,6 +6,7 @@ protection, and a permissive referrer policy.
 """
 
 import logging
+import os
 import secrets
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -155,6 +156,33 @@ def check_production_config() -> list[str]:
             f"APP_BASE_URL ({settings.APP_BASE_URL!r}) is not https — password-reset "
             "links sent to users would be insecure."
         )
+
+    # The voice agent is a separate process, but it reads this same .env, and this
+    # setting breaks the product rather than merely weakening it — so it is checked
+    # here where a bad value stops the deployment at boot, instead of surfacing as a
+    # caller hearing silence mid-call.
+    pinned_llm = (os.getenv("AGENT_LLM_PROVIDER", "") or "").strip()
+    if pinned_llm:
+        problems.append(
+            f"AGENT_LLM_PROVIDER={pinned_llm} pins the voice agent to ONE model with no "
+            "failover — it exists for A/B testing on real calls. If that provider rate-"
+            "limits or stalls, the caller hears silence and the call is lost (seen live "
+            "on a free Gemini key: 5 requests/minute, exhausted after ~3 turns). Unset "
+            "it and set AGENT_LLM_ORDER=groq,gemini,minimax instead."
+        )
+
+    # `SERVER_URL` is where Vobiz posts call webhooks. An ngrok URL is a dev tunnel:
+    # the hostname changes on restart for free accounts and it is a single laptop's
+    # uptime, so inbound calls silently stop working.
+    server_url = (os.getenv("SERVER_URL", "") or "").strip()
+    if "ngrok" in server_url.lower():
+        problems.append(
+            f"SERVER_URL ({server_url!r}) is an ngrok tunnel. Vobiz posts call webhooks "
+            "there, so inbound calls depend on a dev tunnel staying up. Use a stable "
+            "HTTPS domain."
+        )
+    elif server_url and not server_url.startswith("https://"):
+        problems.append(f"SERVER_URL ({server_url!r}) is not https.")
 
     return problems
 
