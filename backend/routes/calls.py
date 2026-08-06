@@ -16,6 +16,7 @@ from backend.config.settings import settings
 from backend.services.db import get_db
 from backend.services import repository, notifications, events
 from backend.services.call_tokens import mint_call_token, verify_call_token, token_ttl_minutes
+from backend.services.plans import effective_call_limit
 from backend.routes.auth import get_current_user
 from backend.models import CallLog, Tenant, Appointment
 from backend.utils.helpers import api_response, serialize_models, to_uuid
@@ -457,6 +458,29 @@ async def agent_context(
             status_code=503,
         )
 
+    # Monthly call quota. This bootstrap is the only point where the tenant is known
+    # before the conversation starts, so it is the one place the decision can be made
+    # while the caller can still be told something.
+    #
+    # Reported as a FLAG on a successful response, not an error: the agent needs the
+    # voice and language config to speak the refusal at all. Returning 4xx here would
+    # leave it with no context and the caller would hear silence — the same outcome as
+    # a crash, which is not what "quota exceeded" should sound like.
+    #
+    # This is a billing control over our own agent, not a security boundary; the agent
+    # holds our secret and runs our code, so a cooperative flag is the right shape.
+    # `is_over_monthly_quota` fails OPEN, so a counting error never blocks a call.
+    quota_exceeded = False
+    if settings.ENFORCE_CALL_QUOTA:
+        limit = effective_call_limit(tenant.get("subscription"), tenant.get("monthly_call_limit"))
+        quota_exceeded = await repository.is_over_monthly_quota(clinic_id, limit)
+        if quota_exceeded:
+            logger.warning(
+                f"agent-context: clinic {clinic_id} is over its monthly call quota "
+                f"(limit={limit}, plan={tenant.get('subscription')!r}) — call {call_id} "
+                "will be answered with the quota message and ended."
+            )
+
     return api_response(success=True, message="ok", data={
         "clinic_id": clinic_id,
         "business_name": tenant.get("name") or "our business",
@@ -470,6 +494,9 @@ async def agent_context(
         "call_token": call_token,
         "call_token_expires_in_min": token_ttl_minutes(),
         "call_id": call_id,
+        # True = say `quota_message` and hang up; do not run the assistant.
+        "quota_exceeded": quota_exceeded,
+        "quota_message": settings.QUOTA_EXCEEDED_MESSAGE if quota_exceeded else "",
     })
 
 

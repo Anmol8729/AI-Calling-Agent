@@ -1087,11 +1087,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         logger.info(f"LLM = {_labels[0]} (fallbacks: {', '.join(_labels[1:])})")
     else:
         agent_llm = _chain[0]
-        # Previously this branch logged nothing at all, so a single-provider setup was
-        # invisible in the log — the one case where you most need to know what is
-        # serving the call, because there is no safety net behind it.
+        # Was logger.info, which read like any other startup line and did not say what
+        # it costs. A single-provider chain is the one configuration with no safety net,
+        # so it is the one that should stand out in the log.
         logger.warning(f"LLM = {_labels[0]} (NO FALLBACK — a single failure goes silent)")
-        logger.info(f"LLM = {_labels[0]} (no fallback configured)")
 
     # Build the TTS engine up front so its HTTP/TLS connection to MiniMax can be
     # warmed in the background (task below) WHILE the session starts. The greeting
@@ -1125,6 +1124,47 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # greeting playback, before the caller's first turn.
     _tts_warm = asyncio.create_task(tts_engine.warm_up())
     _llm_warm = asyncio.create_task(_warm_llm(agent_llm))
+
+    # Monthly call quota exceeded (decided server-side in /agent-context, which is the
+    # only place the tenant is known before the conversation starts). Say one line and
+    # hang up: no STT, no LLM, no tools, so an over-quota call cannot book anything and
+    # costs nothing beyond a few seconds of TTS.
+    #
+    # Handled here rather than earlier because it needs the tenant's voice and language
+    # to speak at all — refusing before that point would mean silence, which is exactly
+    # what a caller should NOT hear.
+    if ctx_data.get("quota_exceeded"):
+        message = (ctx_data.get("quota_message") or "").strip() or (
+            "Sorry, we are unable to take your call at the moment. Please try again later."
+        )
+        logger.warning(
+            f"Call {call_id} refused: clinic {clinic_id} is over its monthly call quota. "
+            "Speaking the quota message and hanging up."
+        )
+        _llm_warm.cancel()
+        try:
+            await asyncio.wait_for(_tts_warm, timeout=3.0)
+        except Exception:  # noqa: BLE001 — a cold TTS still speaks, just slower
+            pass
+        try:
+            quota_session = AgentSession(tts=tts_engine)
+            await quota_session.start(agent=Agent(instructions=""), room=ctx.room)
+            # Same guard as the greeting below: if the caller hangs up while the
+            # session is still starting, say() raises "AgentSession isn't running",
+            # and unguarded that crashed the job (and the worker, under the Windows
+            # recycle) on every early hang-up.
+            await quota_session.say(message, allow_interruptions=False)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Quota message not played — caller likely disconnected: {e}")
+        finally:
+            # Close the call log so the dashboard does not leave it "active" forever,
+            # then delete the room to release the SIP leg.
+            await _report("/api/calls/agent-call-end", {"call_id": call_id, "status": "completed"})
+            try:
+                await get_job_context().delete_room()
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"delete_room after quota refusal failed: {e}")
+        return
 
     session = AgentSession(
         vad=ctx.proc.userdata["vad"],

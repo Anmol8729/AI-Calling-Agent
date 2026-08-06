@@ -1114,3 +1114,78 @@ class TestPatientProvenance:
         fks = list(Patient.__table__.c.created_by.foreign_keys)
         assert fks, "created_by should reference users.id"
         assert fks[0].ondelete == "SET NULL"
+
+
+# --------------------------------------------------------------------------
+# Monthly call quota
+# --------------------------------------------------------------------------
+class TestCallQuotaEnforcement:
+    """The quota was configured but never enforced.
+
+    `ENFORCE_CALL_QUOTA`, `QUOTA_EXCEEDED_MESSAGE` and `is_over_monthly_quota()` all
+    existed, and none of them were referenced by any call path — the enforcement had
+    gone with the `/media-stream` pipeline removed in C1 and nobody noticed, because
+    the flag defaulted to false. Setting it to true did nothing at all, which is worse
+    than having no feature: the operator believes clients are capped when they are not.
+    """
+
+    def _source_of(self, fn) -> str:
+        import inspect
+
+        return inspect.getsource(fn)
+
+    def test_the_quota_is_actually_consulted_on_a_call(self):
+        from backend.routes import calls
+
+        source = self._source_of(calls.agent_context)
+        assert "ENFORCE_CALL_QUOTA" in source
+        assert "is_over_monthly_quota" in source
+        assert "effective_call_limit" in source
+
+    def test_the_quota_decision_is_reported_to_the_agent(self):
+        """The agent needs to know, and it needs the tenant's voice config to say so."""
+        from backend.routes import calls
+
+        source = self._source_of(calls.agent_context)
+        assert '"quota_exceeded"' in source
+        assert '"quota_message"' in source
+
+    def test_an_over_quota_call_is_still_a_successful_response(self):
+        """Returning 4xx would leave the agent with no voice/language config, so the
+        caller would hear silence — indistinguishable from a crash. The refusal has to
+        arrive as a flag on a 200 so it can actually be spoken."""
+        from backend.routes import calls
+
+        source = self._source_of(calls.agent_context)
+        quota_at = source.index("quota_exceeded = False")
+        response_at = source.index("api_response(success=True")
+        assert quota_at < response_at
+        # No early error return between deciding and responding.
+        between = source[quota_at:response_at]
+        assert "status_code=4" not in between
+
+    def test_the_quota_check_fails_open(self):
+        """A counting error must never block a paying customer's caller."""
+        from backend.services import repository
+
+        source = self._source_of(repository.is_over_monthly_quota)
+        assert "if not limit or limit <= 0:" in source
+        assert "return False" in source
+
+    def test_the_agent_speaks_and_hangs_up_instead_of_serving(self):
+        """It must not start STT/LLM/tools for a refused call: an over-quota caller
+        should not be able to book, and the call should cost nothing but a little TTS."""
+        import pathlib
+
+        source = (
+            pathlib.Path(__file__).resolve().parents[2] / "agent" / "main.py"
+        ).read_text(encoding="utf-8")
+
+        assert 'ctx_data.get("quota_exceeded")' in source
+        block = source[source.index('ctx_data.get("quota_exceeded")'):]
+        block = block[: block.index("\n    session = AgentSession(")]
+        assert "delete_room()" in block
+        assert "agent-call-end" in block, "a refused call must not stay 'active' forever"
+        # The refusal session gets TTS only — no stt=, no llm=.
+        assert "AgentSession(tts=tts_engine)" in block
+        assert "stt=" not in block and "llm=" not in block
