@@ -28,6 +28,7 @@ const Messages = lazy(() => import("./pages/Messages"));
 const Setup = lazy(() => import("./pages/Setup"));
 const Billing = lazy(() => import("./pages/Billing"));
 const Account = lazy(() => import("./pages/Account"));
+const Staff = lazy(() => import("./pages/Staff"));
 const Admin = lazy(() => import("./pages/Admin"));
 
 ReactDOM.createRoot(document.getElementById("root")).render(
@@ -76,6 +77,16 @@ ReactDOM.createRoot(document.getElementById("root")).render(
                         }
                       />
                       <Route path="/account" element={<Account />} />
+                      {/* Managing the team is an owner action, and the API agrees:
+                          every /auth/staff route is require_roles(["doctor"]). */}
+                      <Route
+                        path="/staff"
+                        element={
+                          <StaffRoute>
+                            <Staff />
+                          </StaffRoute>
+                        }
+                      />
                       <Route
                         path="/admin"
                         element={

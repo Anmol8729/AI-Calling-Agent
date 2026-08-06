@@ -919,3 +919,156 @@ async def create_staff(
             "clinic_id": str(clinic_id),
         },
     )
+
+
+class StaffAccess(BaseModel):
+    # True = can sign in, False = suspended. Suspending also revokes live sessions.
+    active: bool
+
+
+async def _staff_member_or_error(staff_id: str, current_user: dict, db: AsyncSession):
+    """Resolve a staff row the caller is actually allowed to manage.
+
+    Three conditions, and all three matter:
+      * the id parses — otherwise a garbage path segment reaches the query
+      * the row is in the CALLER's clinic — the clinic comes from the token, never
+        the request, so a doctor cannot reach into another tenant
+      * the row's role is exactly "staff" — this is what stops a doctor deleting a
+        fellow doctor, the clinic owner, or their own account through this endpoint
+
+    Returns (user, None) or (None, error_response). Deliberately returns the same
+    404 for "no such id", "other tenant" and "not a staff account", so the endpoint
+    cannot be used to probe which user ids or roles exist.
+    """
+    clinic_id = to_uuid(current_user.get("clinic_id"))
+    sid = to_uuid(staff_id)
+    if clinic_id is None or sid is None:
+        return None, api_response(success=False, message="Staff account not found", status_code=404)
+
+    member = (await db.execute(
+        select(User).where(User.id == sid, User.clinic_id == clinic_id)
+    )).scalar_one_or_none()
+
+    if member is None or member.role != "staff":
+        return None, api_response(success=False, message="Staff account not found", status_code=404)
+
+    return member, None
+
+
+@router.get("/staff")
+async def list_staff(
+    current_user: dict = Depends(require_roles(["doctor"])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Staff accounts belonging to the calling doctor's clinic.
+
+    Scoped by the caller's own clinic_id, so this cannot enumerate another tenant's
+    team. No password material is returned — only what the management screen shows.
+    """
+    clinic_id = to_uuid(current_user.get("clinic_id"))
+    if clinic_id is None:
+        return api_response(success=False, message="No clinic associated with your account", status_code=400)
+
+    members = (await db.execute(
+        select(User)
+        .where(User.clinic_id == clinic_id, User.role == "staff")
+        .order_by(User.created_at.desc())
+    )).scalars().all()
+
+    return api_response(
+        success=True,
+        message="Staff fetched successfully",
+        data=[
+            {
+                "id": str(m.id),
+                "name": m.name,
+                "email": m.email,
+                "is_active": bool(m.is_active),
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+                "last_login_at": m.last_login_at.isoformat() if m.last_login_at else None,
+                "email_verified": m.email_verified_at is not None,
+            }
+            for m in members
+        ],
+    )
+
+
+@router.patch("/staff/{staff_id}")
+@limiter.limit("20/minute")
+async def set_staff_access(
+    staff_id: str,
+    payload: StaffAccess,
+    request: Request,
+    current_user: dict = Depends(require_roles(["doctor"])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Suspend or restore a staff account.
+
+    Preferred over deletion for someone who has simply left or is away: it stops
+    sign-in immediately while keeping their record and their attribution on the
+    contacts they added.
+
+    Suspending bumps `token_version`, which invalidates every token already issued
+    to them. Without that they would keep working until their current token expired
+    — up to a full day — which is not what "suspend" means to the person clicking it.
+    """
+    member, error = await _staff_member_or_error(staff_id, current_user, db)
+    if error:
+        return error
+
+    member.is_active = payload.active
+    if not payload.active:
+        member.token_version = int(member.token_version or 0) + 1
+    await db.commit()
+
+    await audit.record(
+        "auth.staff_access_changed", actor=current_user, clinic_id=member.clinic_id,
+        target_type="user", target_id=member.id,
+        detail={"staff_email": member.email, "active": bool(payload.active)},
+        request=request,
+    )
+
+    return api_response(
+        success=True,
+        message=f"{member.name} can sign in again" if payload.active else f"{member.name} is suspended",
+        data={"id": str(member.id), "is_active": bool(member.is_active)},
+    )
+
+
+@router.delete("/staff/{staff_id}")
+@limiter.limit("10/minute")
+async def delete_staff(
+    staff_id: str,
+    request: Request,
+    current_user: dict = Depends(require_roles(["doctor"])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently remove a staff account.
+
+    Safe to hard-delete: every foreign key pointing at `users.id` from our own
+    tables is ON DELETE SET NULL (`patients.created_by`, `audit_logs.actor_user_id`)
+    or CASCADE (`password_reset_tokens`), verified against the live database — so
+    contacts they added survive with `created_by` cleared rather than being dragged
+    down with them.
+
+    Their audit history also survives, because `audit_logs.actor_email` is stored as
+    text alongside the id. Losing the id does not lose who did what.
+
+    Any token they still hold stops working immediately: `get_current_user` looks the
+    row up on every request and a missing row is a 401.
+    """
+    member, error = await _staff_member_or_error(staff_id, current_user, db)
+    if error:
+        return error
+
+    removed = {"staff_email": member.email, "staff_name": member.name}
+
+    await db.delete(member)
+    await db.commit()
+
+    await audit.record(
+        "auth.staff_deleted", actor=current_user, clinic_id=to_uuid(current_user.get("clinic_id")),
+        target_type="user", target_id=staff_id, detail=removed, request=request,
+    )
+
+    return api_response(success=True, message=f"Removed {removed['staff_name']}")

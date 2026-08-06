@@ -937,6 +937,71 @@ class TestStaffRoleBoundary:
         source = self._guard_of(auth_routes.create_staff)
         assert 'require_roles(["doctor"])' in source
 
+    def test_only_a_doctor_can_manage_staff(self):
+        """Listing, suspending and removing staff are all owner actions. If staff
+        could suspend or delete each other the role would police itself."""
+        from backend.routes import auth as auth_routes
+
+        for fn in (auth_routes.list_staff, auth_routes.set_staff_access, auth_routes.delete_staff):
+            assert 'require_roles(["doctor"])' in self._guard_of(fn), fn.__name__
+
+    def test_staff_management_cannot_reach_another_tenant_or_a_non_staff_row(self):
+        """The lookup helper is the single choke point for suspend and delete.
+
+        It must take clinic_id from the CALLER and require the target's role to be
+        exactly "staff" — that one condition is what stops a doctor deleting another
+        doctor, the clinic owner, or their own account through this endpoint.
+        """
+        from backend.routes import auth as auth_routes
+
+        source = self._guard_of(auth_routes._staff_member_or_error)
+        assert 'current_user.get("clinic_id")' in source
+        assert "User.clinic_id == clinic_id" in source
+        assert 'member.role != "staff"' in source
+
+        # Both mutating routes must go through it rather than querying directly.
+        for fn in (auth_routes.set_staff_access, auth_routes.delete_staff):
+            assert "_staff_member_or_error" in self._guard_of(fn), fn.__name__
+
+    def test_suspending_staff_revokes_their_live_sessions(self):
+        """is_active alone would let them keep working on an already-issued token
+        until it expired — up to a day. Bumping token_version ends it now."""
+        from backend.routes import auth as auth_routes
+
+        source = self._guard_of(auth_routes.set_staff_access)
+        assert "token_version" in source
+
+    def test_staff_removal_is_audited(self):
+        from backend.routes import auth as auth_routes
+
+        for fn in (auth_routes.delete_staff, auth_routes.set_staff_access):
+            assert "audit.record" in self._guard_of(fn), fn.__name__
+
+    def test_staff_list_never_returns_password_material(self):
+        """The docstring mentions passwords, so check the CODE, not the prose."""
+        from backend.routes import auth as auth_routes
+
+        source = self._guard_of(auth_routes.list_staff)
+        head, _, rest = source.partition('"""')
+        _doc, _, tail = rest.partition('"""')
+        body = (head + tail).lower()
+
+        assert "password" not in body
+        assert "supabase_user_id" not in body  # not the screen's business either
+
+    def test_the_staff_form_states_the_real_password_rule(self):
+        """The original form said "min. 6 characters" while the API demanded 10 plus
+        three character classes, so a well-behaved owner got an unexplained 422."""
+        import pathlib
+
+        page = (
+            pathlib.Path(__file__).resolve().parents[2]
+            / "frontend" / "src" / "pages" / "Staff.jsx"
+        )
+        source = page.read_text(encoding="utf-8")
+        assert "MIN_PASSWORD_LENGTH = 10" in source
+        assert "Min. 6 characters" not in source
+
     def test_staff_creation_is_tenant_scoped(self):
         """clinic_id from the CALLER, never the payload, or one owner could plant an
         account inside another tenant."""

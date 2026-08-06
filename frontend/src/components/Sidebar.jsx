@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   Users,
   UserCog,
+  UserRoundCog,
   X,
   LogOut,
 } from "lucide-react";
@@ -25,6 +26,7 @@ const items = [
   { label: "Appointments", path: "/appointments", icon: CalendarCheck },
   { label: "Messages", path: "/messages", icon: MessageCircle },
   { label: "Agent Setup", path: "/setup", icon: Settings },
+  { label: "Staff", path: "/staff", icon: UserRoundCog },
   { label: "Billing", path: "/billing", icon: CreditCard },
   { label: "Account", path: "/account", icon: UserCog },
 ];
@@ -67,7 +69,7 @@ export default function Sidebar({ open, onClose }) {
 
   // Platform admins get an extra Admin entry (server also enforces access).
   // Staff can only see the core read-only nav items.
-  const STAFF_HIDDEN_PATHS = new Set(["/setup", "/billing", "/admin"]);
+  const STAFF_HIDDEN_PATHS = new Set(["/setup", "/staff", "/billing", "/admin"]);
   const navItems = (user?.is_superadmin
     ? [...items, { label: "Admin", path: "/admin", icon: ShieldCheck }]
     : items

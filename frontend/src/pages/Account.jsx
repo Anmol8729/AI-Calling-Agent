@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Save, KeyRound, UserCog, UserPlus } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import api from "../lib/api";
 import { Button } from "../components/ui/Button";
 import { useAuthStore } from "../store/authStore";
@@ -25,6 +26,7 @@ function Banner({ msg }) {
 }
 
 export default function Account() {
+  const navigate = useNavigate();
   // Adopt the replacement token the server issues after a password change.
   const setToken = useAuthStore((state) => state.setToken);
   // Only an owner/doctor sees the staff management section.
@@ -42,12 +44,6 @@ export default function Account() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingPwd, setSavingPwd] = useState(false);
   const [pwdMsg, setPwdMsg] = useState(null);
-
-  const [staffName, setStaffName] = useState("");
-  const [staffEmail, setStaffEmail] = useState("");
-  const [staffPassword, setStaffPassword] = useState("");
-  const [savingStaff, setSavingStaff] = useState(false);
-  const [staffMsg, setStaffMsg] = useState(null);
 
   useEffect(() => {
     api.get("/auth/me")
@@ -117,34 +113,6 @@ export default function Account() {
     }
   };
 
-  const createStaff = async () => {
-    setStaffMsg(null);
-    if (!staffName.trim() || !staffEmail.trim()) {
-      setStaffMsg({ type: "error", text: "Name and email are required." });
-      return;
-    }
-    if (staffPassword.length < 6) {
-      setStaffMsg({ type: "error", text: "Password must be at least 6 characters." });
-      return;
-    }
-    setSavingStaff(true);
-    try {
-      const res = await api.post("/auth/staff", { name: staffName.trim(), email: staffEmail.trim(), password: staffPassword });
-      if (res.data?.success) {
-        setStaffMsg({ type: "success", text: `Staff account created for ${staffName}.` });
-        setStaffName("");
-        setStaffEmail("");
-        setStaffPassword("");
-      } else {
-        setStaffMsg({ type: "error", text: res.data?.message || "Could not create staff account." });
-      }
-    } catch (err) {
-      setStaffMsg({ type: "error", text: extractError(err) });
-    } finally {
-      setSavingStaff(false);
-    }
-  };
-
   return (
     <div className="space-y-6">
       <div>
@@ -202,49 +170,23 @@ export default function Account() {
         </section>
       </div>
 
+      {/* Staff management used to be a form bolted onto the bottom of this page.
+          It now lives on its own /staff screen, which also lists existing staff and
+          can suspend or remove them — this page is about your own account. */}
       {isDoctor && (
-        <section className="panel rounded-3xl p-6 space-y-4 border border-gray-100 bg-white shadow-sm md:col-span-2">
-          <div className="flex items-center gap-2 border-b border-gray-100 pb-3">
-            <UserPlus className="h-5 w-5 text-gray-500" />
-            <h2 className="text-lg font-semibold text-gray-950">Add staff</h2>
+        <section className="panel flex flex-col gap-3 rounded-3xl border border-gray-100 bg-white p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-2">
+            <UserPlus className="mt-0.5 h-5 w-5 text-gray-500" />
+            <div>
+              <h2 className="text-lg font-semibold text-gray-950">Staff</h2>
+              <p className="text-sm text-gray-500">
+                Add a receptionist, suspend someone who has left, or remove an account.
+              </p>
+            </div>
           </div>
-          <p className="text-sm text-gray-500">
-            Staff accounts can view contacts, appointments, calls, and messages but cannot create, edit, or delete patients, access billing, or change agent settings.
-          </p>
-          <Banner msg={staffMsg} />
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Labeled label="Name">
-              <input
-                className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
-                placeholder="Jane Smith"
-                value={staffName}
-                onChange={(e) => setStaffName(e.target.value)}
-              />
-            </Labeled>
-            <Labeled label="Email">
-              <input
-                type="email"
-                className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
-                placeholder="jane@yourclinic.com"
-                value={staffEmail}
-                onChange={(e) => setStaffEmail(e.target.value)}
-              />
-            </Labeled>
-            <Labeled label="Password">
-              <input
-                type="password"
-                className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
-                placeholder="Min. 6 characters"
-                value={staffPassword}
-                onChange={(e) => setStaffPassword(e.target.value)}
-              />
-            </Labeled>
-          </div>
-          <div className="flex justify-end">
-            <Button onClick={createStaff} disabled={savingStaff}>
-              <UserPlus className="h-4 w-4" /> {savingStaff ? "Creating..." : "Create staff account"}
-            </Button>
-          </div>
+          <Button variant="secondary" onClick={() => navigate("/staff")}>
+            Manage staff
+          </Button>
         </section>
       )}
     </div>
