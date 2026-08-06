@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy import or_
 
+from backend.services import audit
 from backend.services.db import get_db
 from backend.routes.auth import get_current_user, require_roles, require_non_staff
 from backend.models import Patient, Appointment, CallLog
@@ -170,9 +171,16 @@ async def update_patient(
 @router.delete("/{patient_id}")
 async def delete_patient(
     patient_id: str,
+    request: Request,
     current_user: dict = Depends(require_non_staff),
     db: AsyncSession = Depends(get_db),
 ):
+    """Delete a contact. Doctor/manager only.
+
+    This is a HARD delete and cannot be undone, so the identifying fields are copied
+    into the audit row *before* the row goes — otherwise the trail would record that
+    something was deleted without recording what.
+    """
     clinic_id = to_uuid(current_user.get("clinic_id"))
     pid = to_uuid(patient_id)
     if pid is None:
@@ -185,6 +193,14 @@ async def delete_patient(
     if not patient:
         return api_response(success=False, message="Patient not found", status_code=404)
 
+    deleted = {"name": patient.name, "phone": patient.phone, "source": patient.source}
+
     await db.delete(patient)
     await db.commit()
+
+    await audit.record(
+        audit.PATIENT_DELETED, actor=current_user, clinic_id=clinic_id,
+        target_type="patient", target_id=pid, detail=deleted, request=request,
+    )
+
     return api_response(success=True, message="Patient deleted successfully")

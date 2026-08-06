@@ -839,6 +839,49 @@ class TestStaffRoleBoundary:
         assert "require_non_staff" not in self._guard_of(patients.list_patients)
         assert "require_non_staff" not in self._guard_of(patients.create_patient)
 
+    def test_staff_cannot_cancel_or_move_bookings(self):
+        """Cancelling and rescheduling are owner actions.
+
+        All three matter, not just DELETE:
+          * `update_appointment` takes `status`, so `status="cancelled"` through PUT
+            would cancel a booking without ever touching DELETE.
+          * `reschedule_appointment` can move a booking to an arbitrary date, which
+            is functionally the same as cancelling it.
+        Guarding only DELETE would leave both bypasses open.
+        """
+        from backend.routes import appointments
+
+        for fn in (
+            appointments.cancel_appointment,
+            appointments.update_appointment,
+            appointments.reschedule_appointment,
+        ):
+            assert "require_non_staff" in self._guard_of(fn), fn.__name__
+
+    def test_staff_can_still_read_and_create_bookings(self):
+        """A receptionist has to be able to book a walk-in and see the day's list."""
+        from backend.routes import appointments
+
+        assert "require_non_staff" not in self._guard_of(appointments.list_appointments)
+        assert "require_non_staff" not in self._guard_of(appointments.create_appointment)
+
+    def test_destructive_record_actions_are_audited(self):
+        """A hard-deleted contact cannot be recovered, so the trail is the only
+        record that it existed. Cancellations get disputed, so they need an actor."""
+        from backend.routes import appointments, patients
+
+        assert "audit.record" in self._guard_of(patients.delete_patient)
+        assert "audit.record" in self._guard_of(appointments.cancel_appointment)
+
+    def test_patient_delete_captures_identity_before_the_row_is_gone(self):
+        """Reading patient.name after db.delete() would audit an empty record."""
+        source = self._guard_of(__import__(
+            "backend.routes.patients", fromlist=["delete_patient"]
+        ).delete_patient)
+        detail_line = source.index("deleted = {")
+        delete_line = source.index("await db.delete(patient)")
+        assert detail_line < delete_line, "capture the fields before deleting the row"
+
     def test_staff_cannot_change_business_settings(self):
         """This payload carries the AI system prompt, the knowledge base and the
         WhatsApp access token. It was reachable by staff even though the UI hid it."""

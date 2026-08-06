@@ -1,14 +1,14 @@
 import asyncio
 from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.db import get_db
-from backend.services import repository, notifications, events
-from backend.routes.auth import get_current_user
+from backend.services import repository, notifications, events, audit
+from backend.routes.auth import get_current_user, require_non_staff
 from backend.models import Appointment, Tenant
 from backend.schemas.patient import AppointmentCreate
 from backend.utils.helpers import api_response, serialize_model, serialize_models, to_uuid
@@ -244,9 +244,16 @@ async def queue_set(
 async def update_appointment(
     appointment_id: str,
     payload: AppointmentCreate,
-    current_user: dict = Depends(get_current_user),
+    request: Request,
+    current_user: dict = Depends(require_non_staff),
     db: AsyncSession = Depends(get_db),
 ):
+    """Edit a booking. Doctor/manager only.
+
+    `require_non_staff` here is not just about "editing": the payload carries
+    `status`, so a staff member could send `status="cancelled"` and cancel a booking
+    through this route. Guarding DELETE alone would have left that bypass wide open.
+    """
     clinic_id = to_uuid(current_user.get("clinic_id"))
     aid = to_uuid(appointment_id)
     if aid is None:
@@ -259,9 +266,17 @@ async def update_appointment(
     if not appointment:
         return api_response(success=False, message="Appointment not found", status_code=404)
 
-    for key, value in payload.dict(exclude_unset=True).items():
+    changed = payload.dict(exclude_unset=True)
+    for key, value in changed.items():
         setattr(appointment, key, value)
     await db.commit()
+
+    await audit.record(
+        audit.APPOINTMENT_UPDATED, actor=current_user, clinic_id=clinic_id,
+        target_type="appointment", target_id=appointment.id,
+        detail={"fields": sorted(changed.keys()), "status": appointment.status},
+        request=request,
+    )
 
     return api_response(
         success=True,
@@ -274,9 +289,17 @@ async def update_appointment(
 async def reschedule_appointment(
     appointment_id: str,
     payload: AppointmentReschedule,
-    current_user: dict = Depends(get_current_user),
+    request: Request,
+    current_user: dict = Depends(require_non_staff),
     db: AsyncSession = Depends(get_db),
 ):
+    """Move a booking to a new slot. Doctor/manager only.
+
+    Restricted for the same reason as cancelling: moving a booking to an arbitrary
+    date is functionally the same as cancelling it, so leaving this open to staff
+    while blocking DELETE would make that block decorative. Staff can still *create*
+    bookings — a walk-in at the front desk is the case that has to keep working.
+    """
     clinic_id = to_uuid(current_user.get("clinic_id"))
     aid = to_uuid(appointment_id)
     if clinic_id is None or aid is None:
@@ -299,12 +322,25 @@ async def reschedule_appointment(
             status_code=409,
         )
 
+    previous = appointment.appointment_date
     appointment.appointment_at = payload.appointment_at
     appointment.duration_min = payload.duration_min or 30
     appointment.appointment_date = payload.appointment_at.strftime("%d %b %Y, %I:%M %p")
     appointment.status = "scheduled"
     appointment.reminder_sent = False  # re-send a reminder for the new time
     await db.commit()
+
+    await audit.record(
+        audit.APPOINTMENT_UPDATED, actor=current_user, clinic_id=clinic_id,
+        target_type="appointment", target_id=appointment.id,
+        detail={
+            "action": "rescheduled",
+            "from": previous,
+            "to": appointment.appointment_date,
+            "patient_name": appointment.patient_name,
+        },
+        request=request,
+    )
 
     return api_response(
         success=True,
@@ -316,9 +352,14 @@ async def reschedule_appointment(
 @router.delete("/{appointment_id}")
 async def cancel_appointment(
     appointment_id: str,
-    current_user: dict = Depends(get_current_user),
+    request: Request,
+    current_user: dict = Depends(require_non_staff),
     db: AsyncSession = Depends(get_db),
 ):
+    """Cancel a booking. Doctor/manager only — staff must not be able to remove
+    someone from the schedule. A soft cancel (status flips to "cancelled") rather
+    than a row delete, so the slot history survives for reporting and disputes.
+    """
     clinic_id = to_uuid(current_user.get("clinic_id"))
     aid = to_uuid(appointment_id)
     if aid is None:
@@ -333,4 +374,12 @@ async def cancel_appointment(
 
     appointment.status = "cancelled"
     await db.commit()
+
+    await audit.record(
+        audit.APPOINTMENT_CANCELLED, actor=current_user, clinic_id=clinic_id,
+        target_type="appointment", target_id=appointment.id,
+        detail={"patient_name": appointment.patient_name, "when": appointment.appointment_date},
+        request=request,
+    )
+
     return api_response(success=True, message="Appointment cancelled successfully")

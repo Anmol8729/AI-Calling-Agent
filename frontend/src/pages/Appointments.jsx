@@ -1,4 +1,4 @@
-import { CalendarPlus } from "lucide-react";
+import { CalendarDays, CalendarPlus } from "lucide-react";
 import { useMemo, useState, useEffect, useCallback } from "react";
 import api from "../lib/api";
 import DataTable from "../components/DataTable";
@@ -6,6 +6,7 @@ import Modal from "../components/Modal";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { useLabels, useClinicStore } from "../store/clinicStore";
+import { useAuthStore } from "../store/authStore";
 
 const emptyForm = { patient_name: "", phone: "", appointment_at: "", duration_min: 30, reason: "" };
 const DURATIONS = [15, 30, 45, 60, 90];
@@ -43,12 +44,55 @@ const fmtWhen = (row) => {
   return row.appointment_date || "—";
 };
 
+// Local YYYY-MM-DD. Deliberately NOT toISOString().slice(0,10): that converts to
+// UTC first, so a 00:30 IST booking would be filed under the previous day.
+const toDateKey = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+// Which day a row belongs to. Time mode has a real timestamp; token mode only has
+// token_date. Rows with neither (legacy imports) group under "" and sort last.
+const dateKeyOf = (row) => {
+  if (row.appointment_at) {
+    const d = new Date(row.appointment_at);
+    if (!Number.isNaN(d.getTime())) return toDateKey(d);
+  }
+  if (row.token_date) return String(row.token_date).slice(0, 10);
+  return "";
+};
+
+const shiftDays = (n) => {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return toDateKey(d);
+};
+
+// "Today" / "Tomorrow" are what people scan for; anything else gets a full date.
+const groupLabel = (key) => {
+  if (!key) return "No date set";
+  if (key === shiftDays(0)) return "Today";
+  if (key === shiftDays(1)) return "Tomorrow";
+  if (key === shiftDays(-1)) return "Yesterday";
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString([], {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+};
+
 export default function Appointments() {
   const labels = useLabels();
   const bookingMode = useClinicStore((s) => s.clinic?.booking_mode) || "time";
   const isToken = bookingMode === "token";
+  // Staff can book, but cancelling or moving a booking is a doctor/manager action.
+  // The API enforces it too (require_non_staff on PUT, PUT /reschedule and DELETE);
+  // this just keeps the UI from offering a button that would 403.
+  const user = useAuthStore((state) => state.user);
+  const isStaff = user?.role === "staff";
   const [list, setList] = useState([]);
   const [query, setQuery] = useState("");
+  const [dateFilter, setDateFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [live, setLive] = useState(false);
 
@@ -61,6 +105,9 @@ export default function Appointments() {
 
   const [banner, setBanner] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  // Cancelling is confirmed first — it is one click next to "Reschedule" and the
+  // patient has already been told a time.
+  const [confirmRow, setConfirmRow] = useState(null);
 
   // Token/queue mode state ("Now serving" panel)
   const [queue, setQueue] = useState({ current_number: 0, total_issued: 0 });
@@ -163,11 +210,41 @@ export default function Appointments() {
 
   const filtered = useMemo(
     () =>
-      list.filter((a) =>
-        `${a.patient_name} ${a.reason || ""} ${a.status} ${fmtWhen(a)}`.toLowerCase().includes(query.toLowerCase()),
-      ),
-    [query, list],
+      list.filter((a) => {
+        const matchesText = `${a.patient_name} ${a.reason || ""} ${a.status} ${fmtWhen(a)}`
+          .toLowerCase()
+          .includes(query.toLowerCase());
+        const matchesDate = !dateFilter || dateKeyOf(a) === dateFilter;
+        return matchesText && matchesDate;
+      }),
+    [query, dateFilter, list],
   );
+
+  // One section per date. Sorted ascending so the nearest day is at the top, with
+  // undated rows last — the list arrives ordered by time, so rows inside a group
+  // keep that order for free.
+  const groups = useMemo(() => {
+    const buckets = new Map();
+    for (const row of filtered) {
+      const key = dateKeyOf(row);
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(row);
+    }
+    return [...buckets.entries()]
+      .sort(([a], [b]) => {
+        if (a === b) return 0;
+        if (!a) return 1; // undated last
+        if (!b) return -1;
+        return a < b ? -1 : 1;
+      })
+      .map(([key, rows]) => ({ key, rows, label: groupLabel(key) }));
+  }, [filtered]);
+
+  // Dates that actually have bookings, for the quick-jump chips.
+  const availableDates = useMemo(() => {
+    const keys = new Set(list.map(dateKeyOf).filter(Boolean));
+    return [...keys].sort();
+  }, [list]);
 
   const updateField = (key) => (event) => setForm((prev) => ({ ...prev, [key]: event.target.value }));
 
@@ -258,12 +335,15 @@ export default function Appointments() {
     try {
       const res = await api.delete(`/appointments/${row.id}`);
       if (res.data && res.data.success) {
+        setConfirmRow(null);
         setBanner({ type: "success", text: `Cancelled ${labels.booking.toLowerCase()} for ${row.patient_name}.` });
         loadAppointments();
+        if (isToken) loadQueue();
       } else {
         setBanner({ type: "error", text: (res.data && res.data.message) || "Could not cancel." });
       }
     } catch (err) {
+      // A 403 means the server disagreed with the UI about this user's role.
       setBanner({ type: "error", text: extractError(err) });
     } finally {
       setBusyId(null);
@@ -273,19 +353,21 @@ export default function Appointments() {
   const actionsColumn = {
     key: "actions",
     header: "Actions",
-    render: (row) =>
-      row.status === "cancelled" ? (
-        <span className="text-xs text-gray-400">—</span>
-      ) : (
+    render: (row) => {
+      if (row.status === "cancelled") return <span className="text-xs text-gray-400">—</span>;
+      // Staff see the schedule but get no controls over it.
+      if (isStaff) return <span className="text-xs text-gray-400">View only</span>;
+      return (
         <div className="flex gap-2">
           {!isToken && (
             <Button variant="secondary" size="sm" onClick={() => openReschedule(row)}>Reschedule</Button>
           )}
-          <Button variant="secondary" size="sm" disabled={busyId === row.id} onClick={() => cancelAppointment(row)}>
+          <Button variant="danger" size="sm" disabled={busyId === row.id} onClick={() => setConfirmRow(row)}>
             {busyId === row.id ? "..." : "Cancel"}
           </Button>
         </div>
-      ),
+      );
+    },
   };
 
   const columns = isToken
@@ -370,15 +452,74 @@ export default function Appointments() {
       )}
 
       <div className="panel flex flex-col gap-3 rounded-3xl p-4">
-        <input
-          className="w-full rounded-2xl border border-gray-200 px-3.5 py-2 text-sm outline-none focus:border-gray-950"
-          placeholder="Search by name, reason, or status..."
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+          <input
+            className="w-full flex-1 rounded-2xl border border-gray-200 px-3.5 py-2 text-sm outline-none focus:border-gray-950"
+            placeholder="Search by name, reason, or status..."
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-2 rounded-2xl border border-gray-200 px-3 py-2">
+              <CalendarDays className="h-4 w-4 text-gray-400" />
+              <input
+                type="date"
+                className="border-0 text-sm outline-none"
+                value={dateFilter}
+                onChange={(event) => setDateFilter(event.target.value)}
+                aria-label={`Filter ${labels.bookings.toLowerCase()} by date`}
+              />
+            </label>
+            {dateFilter && (
+              <Button variant="ghost" size="sm" onClick={() => setDateFilter("")}>Clear</Button>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <FilterChip active={!dateFilter} onClick={() => setDateFilter("")}>
+            All dates
+          </FilterChip>
+          <FilterChip active={dateFilter === shiftDays(0)} onClick={() => setDateFilter(shiftDays(0))}>
+            Today
+          </FilterChip>
+          <FilterChip active={dateFilter === shiftDays(1)} onClick={() => setDateFilter(shiftDays(1))}>
+            Tomorrow
+          </FilterChip>
+          {dateFilter && !availableDates.includes(dateFilter) && (
+            <span className="text-xs text-gray-400">
+              Nothing booked on {groupLabel(dateFilter)}.
+            </span>
+          )}
+        </div>
       </div>
 
-      <DataTable columns={columns} rows={filtered} loading={loading} emptyTitle={`No ${labels.bookings.toLowerCase()} yet`} />
+      {groups.length === 0 ? (
+        <DataTable
+          columns={columns}
+          rows={[]}
+          loading={loading}
+          emptyTitle={
+            dateFilter
+              ? `No ${labels.bookings.toLowerCase()} on ${groupLabel(dateFilter)}`
+              : `No ${labels.bookings.toLowerCase()} yet`
+          }
+        />
+      ) : (
+        <div className="space-y-8">
+          {groups.map((group) => (
+            <section key={group.key || "undated"} className="space-y-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <h2 className="text-lg font-semibold tracking-tight text-gray-950">{group.label}</h2>
+                <span className="text-xs font-medium text-gray-500">
+                  {group.rows.length} {group.rows.length === 1 ? labels.booking.toLowerCase() : labels.bookings.toLowerCase()}
+                </span>
+              </div>
+              <DataTable columns={columns} rows={group.rows} loading={false} />
+            </section>
+          ))}
+        </div>
+      )}
 
       <Modal
         open={open}
@@ -466,7 +607,54 @@ export default function Appointments() {
           </div>
         </div>
       </Modal>
+
+      <Modal
+        open={!!confirmRow}
+        onClose={() => setConfirmRow(null)}
+        title={`Cancel this ${labels.booking.toLowerCase()}?`}
+        description={confirmRow ? `${confirmRow.patient_name} — ${fmtWhen(confirmRow)}` : ""}
+        footer={
+          <div className="flex justify-end gap-3">
+            <Button variant="secondary" onClick={() => setConfirmRow(null)} disabled={busyId === confirmRow?.id}>
+              Keep it
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => cancelAppointment(confirmRow)}
+              disabled={busyId === confirmRow?.id}
+            >
+              {busyId === confirmRow?.id ? "Cancelling..." : `Cancel ${labels.booking.toLowerCase()}`}
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-sm text-gray-700">
+          The {labels.booking.toLowerCase()} is marked cancelled and the slot opens up again, so the AI
+          receptionist can offer that time to another caller.
+        </p>
+        <p className="mt-3 text-sm text-gray-500">
+          The record is kept (not deleted), so it still shows in history. Nobody is notified
+          automatically — tell {confirmRow?.patient_name || "the patient"} yourself.
+        </p>
+      </Modal>
     </div>
+  );
+}
+
+function FilterChip({ active, onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+        active
+          ? "border-gray-950 bg-gray-950 text-white"
+          : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 

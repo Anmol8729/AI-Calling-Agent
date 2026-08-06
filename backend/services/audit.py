@@ -45,6 +45,12 @@ BILLING_PAYMENT_FAILED = "billing.payment_failed"
 
 SETTINGS_UPDATED = "settings.updated"
 
+# Destructive record actions. Deleting a contact is a HARD delete and cancelling a
+# booking loses the original slot, so both need to be attributable after the fact.
+PATIENT_DELETED = "patient.deleted"
+APPOINTMENT_CANCELLED = "appointment.cancelled"
+APPOINTMENT_UPDATED = "appointment.updated"
+
 # Substrings that must never appear as a detail KEY. A backstop for the "no
 # secrets" rule, not a licence to be careless at call sites.
 _SENSITIVE_HINTS = ("password", "token", "secret", "authorization", "api_key", "apikey")

@@ -1,4 +1,4 @@
-import { Search, UserPlus } from "lucide-react";
+import { Search, Trash2, UserPlus } from "lucide-react";
 import { useMemo, useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../lib/api";
@@ -8,6 +8,7 @@ import DataTable from "../components/DataTable";
 import Modal from "../components/Modal";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
+import { useAuthStore } from "../store/authStore";
 
 const emptyForm = { name: "", phone: "", email: "", age: "", gender: "", notes: "" };
 
@@ -43,11 +44,11 @@ function formatPatient(p) {
 export default function Contacts() {
   const labels = useLabels();
   const navigate = useNavigate();
-  // No role check here on purpose: this page only lists and creates contacts, and
-  // staff are permitted both. Editing and deleting live elsewhere and are blocked
-  // server-side by require_non_staff. (An unused `isStaff` was left here by the
-  // Staff Panel work; removed rather than silenced, since there is nothing on this
-  // page for it to gate.)
+  // Staff may read and create contacts, but not delete them. Mirrors Sidebar's
+  // role check. This only hides the button — `DELETE /api/patients/{id}` is guarded
+  // by require_non_staff, so a staff token gets a 403 either way.
+  const user = useAuthStore((state) => state.user);
+  const isStaff = user?.role === "staff";
   const [list, setList] = useState([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -59,6 +60,11 @@ export default function Contacts() {
   const [formError, setFormError] = useState("");
 
   const [banner, setBanner] = useState(null); // { type: "success" | "error", text }
+
+  // Deleting a contact is permanent, so it goes through a confirm step that names
+  // the record. `confirmRow` doubles as the modal's open flag.
+  const [confirmRow, setConfirmRow] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadContacts = useCallback(async () => {
     setLoading(true);
@@ -128,6 +134,27 @@ export default function Contacts() {
     }
   };
 
+  const confirmDelete = async () => {
+    if (!confirmRow) return;
+    setDeleting(true);
+    setBanner(null);
+    try {
+      const res = await api.delete(`/patients/${confirmRow.id}`);
+      if (res.data && res.data.success) {
+        setConfirmRow(null);
+        setBanner({ type: "success", text: `Deleted ${confirmRow.name}.` });
+        loadContacts();
+      } else {
+        setBanner({ type: "error", text: (res.data && res.data.message) || "Could not delete." });
+      }
+    } catch (err) {
+      // A 403 here means the role check server-side disagreed with the UI.
+      setBanner({ type: "error", text: extractError(err) });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const columns = [
     { key: "name", header: "Name" },
     { key: "phone", header: "Phone" },
@@ -152,7 +179,14 @@ export default function Contacts() {
       key: "actions",
       header: "",
       render: (row) => (
-        <Button variant="secondary" size="sm" onClick={() => navigate(`/contacts/${row.id}`)}>View</Button>
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" size="sm" onClick={() => navigate(`/contacts/${row.id}`)}>View</Button>
+          {!isStaff && (
+            <Button variant="danger" size="sm" onClick={() => setConfirmRow(row)}>
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </Button>
+          )}
+        </div>
       ),
     },
   ];
@@ -224,6 +258,31 @@ export default function Contacts() {
           <Field label="Gender" value={form.gender} onChange={updateField("gender")} placeholder="Female / Male / Other" />
           <Field label="Follow-up notes" value={form.notes} onChange={updateField("notes")} placeholder="Prefers morning calls" />
         </div>
+      </Modal>
+
+      <Modal
+        open={!!confirmRow}
+        onClose={() => setConfirmRow(null)}
+        title={`Delete ${labels.contact.toLowerCase()}?`}
+        description="This cannot be undone."
+        footer={
+          <div className="flex justify-end gap-3">
+            <Button variant="secondary" onClick={() => setConfirmRow(null)} disabled={deleting}>Keep</Button>
+            <Button variant="danger" onClick={confirmDelete} disabled={deleting}>
+              {deleting ? "Deleting..." : "Delete permanently"}
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-sm text-gray-700">
+          <span className="font-semibold text-gray-950">{confirmRow?.name}</span>
+          {confirmRow?.phone ? ` (${confirmRow.phone})` : ""} will be removed from your{" "}
+          {labels.contacts.toLowerCase()}.
+        </p>
+        <p className="mt-3 text-sm text-gray-500">
+          The AI receptionist will no longer recognise this number on an inbound call, so the caller
+          will be treated as new. Past {labels.bookings.toLowerCase()} and call records are kept.
+        </p>
       </Modal>
     </div>
   );
