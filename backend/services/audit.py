@@ -50,6 +50,7 @@ SETTINGS_UPDATED = "settings.updated"
 PATIENT_DELETED = "patient.deleted"
 APPOINTMENT_CANCELLED = "appointment.cancelled"
 APPOINTMENT_UPDATED = "appointment.updated"
+APPOINTMENT_DELETED = "appointment.deleted"
 
 # Substrings that must never appear as a detail KEY. A backstop for the "no
 # secrets" rule, not a licence to be careless at call sites.

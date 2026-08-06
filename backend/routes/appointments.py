@@ -383,3 +383,56 @@ async def cancel_appointment(
     )
 
     return api_response(success=True, message="Appointment cancelled successfully")
+
+
+@router.delete("/{appointment_id}/permanent")
+async def delete_appointment_permanently(
+    appointment_id: str,
+    request: Request,
+    current_user: dict = Depends(require_non_staff),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a booking row entirely. Doctor/manager only.
+
+    Separate from DELETE (which is a soft cancel) rather than a flag on it, so a
+    permanent delete can never happen by accident from an existing caller. Cancelling
+    is the normal path — this exists to clear out junk and test rows.
+
+    Known consequence, surfaced in the UI: today's token numbers come from
+    `SELECT max(token_number)` over live rows, so deleting today's highest token lets
+    the next booking be handed the same number. Cancel instead of deleting if the
+    clinic is mid-queue.
+    """
+    clinic_id = to_uuid(current_user.get("clinic_id"))
+    aid = to_uuid(appointment_id)
+    if clinic_id is None or aid is None:
+        return api_response(success=False, message="Appointment not found", status_code=404)
+
+    appointment = (await db.execute(
+        select(Appointment).where(Appointment.id == aid, Appointment.clinic_id == clinic_id)
+    )).scalar_one_or_none()
+    if not appointment:
+        return api_response(success=False, message="Appointment not found", status_code=404)
+
+    # Copied before the delete: afterwards there is nothing left to describe.
+    # "queue_*" rather than "token_*" on purpose — audit._scrub() redacts any key
+    # containing "token" (it is looking for credentials), which would blank out the
+    # one detail that matters most for a token-mode booking.
+    removed = {
+        "patient_name": appointment.patient_name,
+        "phone": appointment.phone,
+        "when": appointment.appointment_date,
+        "status": appointment.status,
+        "queue_number": appointment.token_number,
+        "queue_date": appointment.token_date,
+    }
+
+    await db.delete(appointment)
+    await db.commit()
+
+    await audit.record(
+        audit.APPOINTMENT_DELETED, actor=current_user, clinic_id=clinic_id,
+        target_type="appointment", target_id=aid, detail=removed, request=request,
+    )
+
+    return api_response(success=True, message="Appointment deleted permanently")

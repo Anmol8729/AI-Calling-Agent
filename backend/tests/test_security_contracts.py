@@ -855,8 +855,43 @@ class TestStaffRoleBoundary:
             appointments.cancel_appointment,
             appointments.update_appointment,
             appointments.reschedule_appointment,
+            appointments.delete_appointment_permanently,
         ):
             assert "require_non_staff" in self._guard_of(fn), fn.__name__
+
+    def test_permanent_appointment_delete_is_a_separate_route_from_cancel(self):
+        """Cancel must not be able to turn into a permanent delete by accident.
+
+        Kept as its own path rather than a flag on DELETE, so no existing caller can
+        trip it and the destructive version has to be asked for by name.
+        """
+        from backend.routes import appointments
+
+        cancel = self._guard_of(appointments.cancel_appointment)
+        assert "db.delete" not in cancel, "cancel must stay a soft status change"
+        assert 'status = "cancelled"' in cancel
+
+        hard = self._guard_of(appointments.delete_appointment_permanently)
+        assert "db.delete" in hard
+        assert "audit.record" in hard
+        # Identity has to be captured before the row disappears.
+        assert hard.index("removed = {") < hard.index("await db.delete(appointment)")
+
+    def test_deleted_booking_audit_is_not_eaten_by_the_secret_scrubber(self):
+        """`audit._scrub` blanks any key containing "token" because it hunts for
+        credentials. A token-mode booking's queue number is not a credential, and
+        naming it `token_number` silently logged "[redacted]" — losing the single
+        most useful detail about the row that was destroyed."""
+        from backend.services.audit import _scrub
+
+        assert _scrub({"token_number": 3})["token_number"] == "[redacted]"
+        assert _scrub({"queue_number": 3})["queue_number"] == 3
+
+        from backend.routes import appointments
+
+        source = self._guard_of(appointments.delete_appointment_permanently)
+        assert '"queue_number"' in source
+        assert '"token_number"' not in source
 
     def test_staff_can_still_read_and_create_bookings(self):
         """A receptionist has to be able to book a walk-in and see the day's list."""

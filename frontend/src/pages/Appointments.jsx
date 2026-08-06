@@ -1,4 +1,4 @@
-import { CalendarDays, CalendarPlus } from "lucide-react";
+import { CalendarDays, CalendarPlus, Trash2 } from "lucide-react";
 import { useMemo, useState, useEffect, useCallback } from "react";
 import api from "../lib/api";
 import DataTable from "../components/DataTable";
@@ -108,6 +108,8 @@ export default function Appointments() {
   // Cancelling is confirmed first — it is one click next to "Reschedule" and the
   // patient has already been told a time.
   const [confirmRow, setConfirmRow] = useState(null);
+  // Permanent delete is a separate confirm: cancelling keeps the record, this does not.
+  const [deleteRow, setDeleteRow] = useState(null);
 
   // Token/queue mode state ("Now serving" panel)
   const [queue, setQueue] = useState({ current_number: 0, total_issued: 0 });
@@ -350,20 +352,53 @@ export default function Appointments() {
     }
   };
 
+  const deleteAppointment = async (row) => {
+    setBanner(null);
+    setBusyId(row.id);
+    try {
+      const res = await api.delete(`/appointments/${row.id}/permanent`);
+      if (res.data && res.data.success) {
+        setDeleteRow(null);
+        setBanner({ type: "success", text: `Deleted ${labels.booking.toLowerCase()} for ${row.patient_name}.` });
+        loadAppointments();
+        if (isToken) loadQueue();
+      } else {
+        setBanner({ type: "error", text: (res.data && res.data.message) || "Could not delete." });
+      }
+    } catch (err) {
+      setBanner({ type: "error", text: extractError(err) });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const actionsColumn = {
     key: "actions",
     header: "Actions",
     render: (row) => {
-      if (row.status === "cancelled") return <span className="text-xs text-gray-400">—</span>;
       // Staff see the schedule but get no controls over it.
       if (isStaff) return <span className="text-xs text-gray-400">View only</span>;
+
+      // An already-cancelled row has nothing left to cancel or move, but it is
+      // exactly the kind of clutter worth removing — so Delete stays available.
+      if (row.status === "cancelled") {
+        return (
+          <Button variant="ghost" size="sm" disabled={busyId === row.id} onClick={() => setDeleteRow(row)}>
+            <Trash2 className="h-3.5 w-3.5" /> {busyId === row.id ? "..." : "Delete"}
+          </Button>
+        );
+      }
+
       return (
         <div className="flex gap-2">
           {!isToken && (
             <Button variant="secondary" size="sm" onClick={() => openReschedule(row)}>Reschedule</Button>
           )}
-          <Button variant="danger" size="sm" disabled={busyId === row.id} onClick={() => setConfirmRow(row)}>
+          <Button variant="secondary" size="sm" disabled={busyId === row.id} onClick={() => setConfirmRow(row)}>
             {busyId === row.id ? "..." : "Cancel"}
+          </Button>
+          <Button variant="danger" size="sm" disabled={busyId === row.id} onClick={() => setDeleteRow(row)}>
+            <Trash2 className="h-3.5 w-3.5" /> Delete
           </Button>
         </div>
       );
@@ -636,6 +671,45 @@ export default function Appointments() {
           The record is kept (not deleted), so it still shows in history. Nobody is notified
           automatically — tell {confirmRow?.patient_name || "the patient"} yourself.
         </p>
+      </Modal>
+
+      <Modal
+        open={!!deleteRow}
+        onClose={() => setDeleteRow(null)}
+        title={`Delete this ${labels.booking.toLowerCase()} permanently?`}
+        description={deleteRow ? `${deleteRow.patient_name} — ${fmtWhen(deleteRow)}` : ""}
+        footer={
+          <div className="flex justify-end gap-3">
+            <Button variant="secondary" onClick={() => setDeleteRow(null)} disabled={busyId === deleteRow?.id}>
+              Keep it
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => deleteAppointment(deleteRow)}
+              disabled={busyId === deleteRow?.id}
+            >
+              {busyId === deleteRow?.id ? "Deleting..." : "Delete permanently"}
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-sm text-gray-700">
+          The row is removed for good and will not appear in history or reports. This cannot be
+          undone.
+        </p>
+        {deleteRow?.status !== "cancelled" && (
+          <p className="mt-3 text-sm text-gray-500">
+            If the {labels.booking.toLowerCase()} simply is not happening, <strong>Cancel</strong> is
+            usually the better choice — it frees the slot but keeps the record.
+          </p>
+        )}
+        {deleteRow?.token_number != null && deleteRow?.token_date === shiftDays(0) && (
+          <p className="mt-3 rounded-2xl border border-amber-100 bg-amber-50 p-3 text-sm text-amber-900">
+            This is token <strong>#{deleteRow.token_number}</strong> for today. Today's numbering
+            counts up from the highest token still on file, so deleting this one can hand the same
+            number to the next patient. Mid-queue, cancel it instead.
+          </p>
+        )}
       </Modal>
     </div>
   );
