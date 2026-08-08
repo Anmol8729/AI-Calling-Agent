@@ -246,8 +246,11 @@ AGENT_PREEMPTIVE=0                         # 1 caused "Request timed out" + 13s 
 # (the link is only written to the server log). See section 11 for the DNS records.
 SMTP_HOST=smtp-relay.brevo.com             # or your provider
 SMTP_PORT=587                              # 587 = STARTTLS · 465 = implicit TLS
-SMTP_USER=<provider login>
-SMTP_PASSWORD=<provider SMTP key>
+# NOT your Brevo account email. Brevo issues a separate SMTP login in the form
+# xxxxxx@smtp-brevo.com (Settings > SMTP & API > SMTP tab). Using the account email
+# fails authentication with 535.
+SMTP_USER=<the xxxxxx@smtp-brevo.com login>
+SMTP_PASSWORD=<the SMTP key, not your dashboard password>
 SMTP_FROM=Clarivo <no-reply@yourdomain.com># must be an address the provider verified
 SMTP_TLS=true
 
