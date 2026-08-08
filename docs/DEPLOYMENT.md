@@ -176,17 +176,48 @@ JWT_SECRET=<paste output of: python3 -c "import secrets; print(secrets.token_url
 AGENT_RECYCLE_AFTER_CALL=0
 AGENT_IDLE_PROCESSES=2                     # raise with expected concurrent calls
 
-# --- Keep the tuning that was verified on real calls ---
-AGENT_LLM_PROVIDER=gemini                  # Groq is faster but skipped the booking intake
+# --- Schema: migrations only. The app must not rewrite the schema at boot ---
+DB_AUTO_SCHEMA=false                       # run `alembic upgrade head` as a deploy step
+
+# --- LLM chain. Do NOT pin a single provider here ---
+# This file used to say AGENT_LLM_PROVIDER=gemini. That pins ONE model and skips the
+# FallbackAdapter, so when it rate-limits the caller hears silence with nothing behind
+# it — observed on a free Gemini key, which allows 5 REQUESTS/minute while a call
+# spends 1-2 per turn (dry after ~3 turns). check_production_config now refuses to
+# boot with it set, so following the old advice would fail at startup.
+# Groq first: ~0.5s to first token vs Gemini's 1.3-3s, and its quota is separate.
+AGENT_LLM_ORDER=groq,gemini,minimax
 AGENT_PREEMPTIVE=0                         # 1 caused "Request timed out" + 13s replies
+
+# --- Email. Without this, password resets and email verification do NOTHING ---
+# (the link is only written to the server log). See section 11 for the DNS records.
+SMTP_HOST=smtp-relay.brevo.com             # or your provider
+SMTP_PORT=587                              # 587 = STARTTLS · 465 = implicit TLS
+SMTP_USER=<provider login>
+SMTP_PASSWORD=<provider SMTP key>
+SMTP_FROM=Clarivo <no-reply@yourdomain.com># must be an address the provider verified
+SMTP_TLS=true
+
+# --- Keep the tuning that was verified on real calls ---
 MINIMAX_TTS_MODEL=speech-2.6-turbo
 MINIMAX_TTS_EMOTION=
 MINIMAX_TTS_SAMPLE_RATE=8000               # PSTN is 8kHz anyway; lower ttfb
 AGENT_TTS_CACHE=1                          # greeting served from disk in ~3ms
 ```
 
-Keep `AGENT_INTERNAL_SECRET` (or `JWT_SECRET`) consistent — the agent authenticates to
-`/api/calls/agent-*` with it. Lock the file down:
+`AGENT_INTERNAL_SECRET` must be set to its own value. It used to fall back to
+`JWT_SECRET`; that fallback is gone from both the backend and the agent, because it
+reused the session-signing key as an API credential — leak it anywhere in the call
+path and an attacker could mint tokens for any user. With it unset, every booking
+returns 401.
+
+Prove the mailer works before a customer needs it:
+
+```bash
+.venv/bin/python -m backend.services.email you@example.com
+```
+
+Lock the file down:
 
 ```bash
 chmod 600 ~/AI-Calling-Agent/.env
@@ -325,7 +356,66 @@ numbers. ngrok is no longer needed anywhere.
 
 ---
 
-## 10. Verify (in this order)
+## 10. Point Supabase Auth at the new domain (Google sign-in breaks without this)
+
+Easy to miss, because nothing in this repo needs changing. The frontend asks Supabase
+to send the user back to `${window.location.origin}/auth/callback`
+(`frontend/src/lib/supabase.js`), so on production that becomes
+`https://app.yourdomain.com/auth/callback`. Supabase refuses any `redirectTo` that is
+not on its allowlist, and the failure surfaces as a generic "redirect not allowed"
+after the user has already picked their Google account.
+
+In the Supabase dashboard → **Authentication → URL Configuration**:
+
+| Field | Value |
+|---|---|
+| Site URL | `https://app.yourdomain.com` |
+| Redirect URLs | add `https://app.yourdomain.com/**` (keep `http://localhost:3000/**` for local dev) |
+
+**Google Cloud Console** needs no change for the domain: the authorised redirect URI
+is Supabase's own callback (`https://<project-ref>.supabase.co/auth/v1/callback`), not
+ours. Only touch it if the Supabase project changes.
+
+Verify by signing in with Google on the deployed site — a new row should appear in
+`public.users` with `supabase_user_id` set, and an `auth.login` audit row with
+`{"provider": "google"}`.
+
+---
+
+## 11. Email DNS (or resets land in spam)
+
+SMTP credentials alone are not enough. Mail sent as `@yourdomain.com` needs the domain
+to authorise the provider, or it is rejected or filed as spam — and nothing logs an
+error, because the send itself succeeded.
+
+Your provider will give you exact values; the shape is:
+
+| Record | Name | Purpose |
+|---|---|---|
+| TXT | `@` | **SPF** — lists who may send as your domain, e.g. `v=spf1 include:spf.brevo.com ~all` |
+| TXT | provider-specified (e.g. `mail._domainkey`) | **DKIM** — signs each message so it cannot be forged |
+| TXT | `_dmarc` | **DMARC** — what to do with failures, e.g. `v=DMARC1; p=none; rua=mailto:you@yourdomain.com` |
+
+Start DMARC at `p=none` (monitor only). Moving to `p=reject` before SPF and DKIM both
+pass will silently drop your own password-reset emails.
+
+Then verify end to end, not just the SMTP handshake:
+
+```bash
+.venv/bin/python -m backend.services.email you@yourdomain.com   # 1. can we send at all
+curl -X POST https://api.yourdomain.com/api/auth/forgot-password \
+     -H 'Content-Type: application/json' \
+     -d '{"email":"you@yourdomain.com"}'                        # 2. does the real flow send
+```
+
+Step 2 always answers "if that email is registered, a reset link has been sent" — that
+is deliberate anti-enumeration, so it is NOT evidence of success. Check the inbox, and
+check it did not land in spam. Then click the link and confirm it opens
+`https://app.yourdomain.com/reset-password` and the password actually changes.
+
+---
+
+## 12. Verify (in this order)
 
 ```bash
 # 1. Services alive
