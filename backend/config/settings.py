@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     # beyond a tenant's monthly allowance are answered with QUOTA_EXCEEDED_MESSAGE
     # and ended.
     ENFORCE_CALL_QUOTA: bool = os.getenv("ENFORCE_CALL_QUOTA", "false").lower() == "true"
+
+    # Read by the voice agent, declared here only so check_production_config() can
+    # refuse to boot when it is set. It MUST be a declared field: pydantic-settings
+    # loads `.env` into this model, not into os.environ, so `os.getenv` in the guard
+    # returned None and the check silently never fired.
+    AGENT_LLM_PROVIDER: str = os.getenv("AGENT_LLM_PROVIDER", "")
     QUOTA_EXCEEDED_MESSAGE: str = os.getenv("QUOTA_EXCEEDED_MESSAGE", "Sorry, we are unable to take your call at the moment. Please try again later.")
 
     # Payments (Razorpay). Self-serve plan upgrades are enabled only when both

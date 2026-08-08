@@ -6,7 +6,6 @@ protection, and a permissive referrer policy.
 """
 
 import logging
-import os
 import secrets
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -161,7 +160,13 @@ def check_production_config() -> list[str]:
     # setting breaks the product rather than merely weakening it — so it is checked
     # here where a bad value stops the deployment at boot, instead of surfacing as a
     # caller hearing silence mid-call.
-    pinned_llm = (os.getenv("AGENT_LLM_PROVIDER", "") or "").strip()
+    #
+    # Read through `settings`, NOT os.getenv. pydantic-settings loads `.env` into the
+    # Settings model and never touches os.environ, so the first version of this check
+    # read None on every real boot and did nothing. It passed its test only because
+    # monkeypatch.setenv writes to os.environ — the test proved the logic and skipped
+    # the wiring. Anything checked here has to be a declared Settings field.
+    pinned_llm = (settings.AGENT_LLM_PROVIDER or "").strip()
     if pinned_llm:
         problems.append(
             f"AGENT_LLM_PROVIDER={pinned_llm} pins the voice agent to ONE model with no "
@@ -174,7 +179,7 @@ def check_production_config() -> list[str]:
     # `SERVER_URL` is where Vobiz posts call webhooks. An ngrok URL is a dev tunnel:
     # the hostname changes on restart for free accounts and it is a single laptop's
     # uptime, so inbound calls silently stop working.
-    server_url = (os.getenv("SERVER_URL", "") or "").strip()
+    server_url = (settings.SERVER_URL or "").strip()
     if "ngrok" in server_url.lower():
         problems.append(
             f"SERVER_URL ({server_url!r}) is an ngrok tunnel. Vobiz posts call webhooks "

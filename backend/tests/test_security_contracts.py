@@ -464,6 +464,11 @@ class TestProductionConfigGuard:
             "APP_BASE_URL": "https://app.clarivo.ai",
             "SMTP_HOST": "smtp.example.com",
             "DB_AUTO_SCHEMA": False,
+            # Real values, so the healthy case is genuinely healthy: the developer's
+            # own .env has an ngrok SERVER_URL, which would otherwise make every test
+            # in this class see a problem it did not ask about.
+            "SERVER_URL": "https://api.clarivo.ai",
+            "AGENT_LLM_PROVIDER": "",
         }
         safe.update(overrides)
         for key, value in safe.items():
@@ -486,20 +491,47 @@ class TestProductionConfigGuard:
         rate limit or stall means the caller hears silence with nothing behind it. It
         is an A/B-testing switch. Seen live on a free Gemini key: 5 requests/minute,
         exhausted after ~3 turns of one call."""
-        monkeypatch.setenv("AGENT_LLM_PROVIDER", "gemini")
-        assert "AGENT_LLM_PROVIDER" in self._problems(monkeypatch)
-
-        monkeypatch.delenv("AGENT_LLM_PROVIDER", raising=False)
-        assert "AGENT_LLM_PROVIDER" not in self._problems(monkeypatch)
+        assert "AGENT_LLM_PROVIDER" in self._problems(monkeypatch, AGENT_LLM_PROVIDER="gemini")
+        assert "AGENT_LLM_PROVIDER" not in self._problems(monkeypatch, AGENT_LLM_PROVIDER="")
 
     def test_an_ngrok_webhook_target_blocks_a_production_boot(self, monkeypatch):
         """Vobiz posts call webhooks to SERVER_URL. A dev tunnel means inbound calls
         depend on one laptop staying up, and the hostname moves on a free plan."""
-        monkeypatch.setenv("SERVER_URL", "https://polio-ribcage-crate.ngrok-free.dev")
-        assert "ngrok" in self._problems(monkeypatch)
+        ngrok = "https://polio-ribcage-crate.ngrok-free.dev"
+        assert "ngrok" in self._problems(monkeypatch, SERVER_URL=ngrok)
+        assert "ngrok" not in self._problems(monkeypatch, SERVER_URL="https://api.clarivo.ai")
 
-        monkeypatch.setenv("SERVER_URL", "https://api.clarivo.ai")
-        assert "ngrok" not in self._problems(monkeypatch)
+    def test_these_checks_read_settings_not_os_environ(self):
+        """The first version of the two checks above used os.getenv and therefore never
+        fired on a real boot: pydantic-settings loads `.env` into the Settings model,
+        never into os.environ. Both tests still passed, because monkeypatch.setenv
+        writes to os.environ — they proved the logic and skipped the wiring.
+
+        The bug was only visible by noticing the ngrok warning missing from a live
+        startup log, so pin the wiring here rather than relying on that again.
+        """
+        import ast
+        import inspect
+        import textwrap
+
+        from backend.middlewares import security
+
+        # Parsed, not grepped: the comment above this check mentions os.getenv on
+        # purpose, and a substring search would trip over its own explanation.
+        tree = ast.parse(textwrap.dedent(inspect.getsource(security.check_production_config)))
+        env_reads = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ("getenv", "environ")
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "os"
+        ]
+        assert not env_reads, (
+            "check_production_config must read settings.*; os.getenv does not see .env, "
+            "so any check written that way silently never fires"
+        )
 
     def test_the_agent_refuses_to_serve_calls_with_a_pinned_llm_in_production(self):
         """The backend guard stops the deployment, but the agent is a separate process
