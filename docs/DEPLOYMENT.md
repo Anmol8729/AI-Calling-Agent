@@ -457,9 +457,36 @@ Verify by signing in with Google on the deployed site — a new row should appea
 
 ## 11. Email DNS (or resets land in spam)
 
+> **"Can we just use Supabase's SMTP?" — no, and it is worth knowing why.**
+>
+> Supabase does not *provide* an SMTP relay; its dashboard SMTP settings ask you to
+> plug in a provider of your own. Its built-in sender exists only for Supabase Auth's
+> own emails and is capped at [2 messages per hour](https://supabase.com/docs/guides/auth/auth-smtp),
+> which Supabase documents as unsuitable for production.
+>
+> It could not send our emails even if the cap were lifted. Password reset and email
+> verification are **our** flows: the token is a row in our `password_reset_tokens`
+> table and the link is built from `APP_BASE_URL`
+> (`/reset-password?token=…`, `/verify-email?token=…`). Supabase has no knowledge of
+> those tokens. And Supabase Auth sends nothing at all in this app — the only Supabase
+> call anywhere is `signInWithOAuth` for Google, which emails no one. So configuring
+> Supabase's SMTP would change nothing here. Revisit only if Supabase email/password
+> sign-in or magic links are ever switched on.
+
 SMTP credentials alone are not enough. Mail sent as `@yourdomain.com` needs the domain
 to authorise the provider, or it is rejected or filed as spam — and nothing logs an
 error, because the send itself succeeded.
+
+Current free tiers, for a workload that is only resets and verification (a handful of
+messages a day):
+
+| Provider | Free tier | Notes |
+|---|---|---|
+| Brevo | [300/day, permanent](https://help.brevo.com/hc/en-us/articles/208580669-FAQs-What-are-the-limits-of-the-Free-plan) | plain SMTP relay, documented DKIM setup |
+| Resend | [100/day, 3,000/month](https://resend.com/docs/knowledge-base/account-quotas-and-limits) | better DX, still ample for resets |
+| Amazon SES | cheapest at scale, `ap-south-1` is in Mumbai | needs sandbox-exit approval first, so not same-day |
+
+SendGrid's free tier was withdrawn in 2025 — do not plan around it.
 
 Your provider will give you exact values; the shape is:
 
