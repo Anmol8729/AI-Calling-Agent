@@ -488,6 +488,27 @@ messages a day):
 
 SendGrid's free tier was withdrawn in 2025 — do not plan around it.
 
+### Brevo gotchas, if that is the provider
+
+Three things that each cost an hour if you meet them at deploy time rather than
+reading them first:
+
+* **Sending is not enabled the moment you sign up.** Brevo reviews each account
+  individually and
+  [will not enable sending until domain verification is complete and the account passes
+  review](https://wpmailsmtp.com/docs/permission-denied-smtp-account-not-activated/).
+  Register and start domain verification *before* the deploy window, not during it.
+* **IP authorization.** If it is switched on, the SMTP relay rejects connections from
+  addresses that are not allowlisted, with `525`. A VM has a new IP that your laptop
+  did not have, so a setup that worked locally can fail there. Allowlist the VM IP or
+  turn the restriction off.
+* **Free-plan emails carry Brevo branding.** Fine for a reset link, worth knowing
+  before a client sees it. It goes away on a paid plan.
+
+Error codes worth recognising from the relay: `535` = wrong credentials (the SMTP key,
+not your dashboard password), `525` = IP not authorised, "sender not valid" = the From
+address or domain has not been verified yet.
+
 Your provider will give you exact values; the shape is:
 
 | Record | Name | Purpose |
