@@ -382,7 +382,9 @@ DNS at your registrar:
 ```caddyfile
 api.yourdomain.com {
 	encode zstd gzip
-	# WebSockets (the /media-stream path) pass through reverse_proxy unchanged.
+	# WebSockets pass through reverse_proxy unchanged — Caddy handles the upgrade.
+	# The live path is /ws/notifications (the dashboard's notification bell). The
+	# /media-stream endpoint this comment used to name was removed in C1.
 	reverse_proxy 127.0.0.1:8000
 }
 ```
