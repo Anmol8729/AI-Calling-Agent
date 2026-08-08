@@ -7,3 +7,11 @@ livekit-plugins-silero==1.6.6
 livekit-plugins-noise-cancellation>=0.2
 python-dotenv==1.2.2
 httpx>=0.28
+# Used directly by minimax_tts.py for the soft-knee TTS limiter (a plain multiply
+# clipped the peaks and sounded computerized). It currently arrives anyway as a
+# transitive dependency of livekit-agents and onnxruntime, which is exactly why it was
+# missing here — a fresh `pip install -r` happened to work. Declared so a future
+# version bump that drops it cannot break the agent on a new machine.
+# Floor, not a pin: livekit constrains its own numpy range, and the calls used here
+# (frombuffer / tanh / clip / sign / where) are stable across 1.x and 2.x.
+numpy>=1.26

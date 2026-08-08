@@ -79,9 +79,41 @@ only makes **outbound** connections (LiveKit, Gemini, MiniMax, Deepgram, Supabas
 
 ## 1. First login and hardening
 
+### Pre-flight: is this the right VM?
+
+Run this before anything else. Two of these are not fixable by tuning — you would have
+to move to a different VM, and finding out an hour into the deploy is the expensive way
+to learn it.
+
 ```bash
 ssh root@<VM_IP>
 
+uname -m                       # MUST be x86_64. aarch64 = wrong VM, stop here.
+lsb_release -ds                # expect Ubuntu 24.04
+nproc                          # >= 2
+free -m  | awk '/Mem:/{print "RAM  " $2 " MB"}'      # >= 3800
+df -h /  | awk 'NR==2{print "disk " $2 " total, " $4 " free"}'   # >= 40G
+
+# Is the CPU shared? Run for ~15s and watch the "st" (steal) column. Anything
+# consistently above ~2-3% means the host is oversubscribed and calls will glitch.
+vmstat 1 15 | awk 'NR>2{print "steal% " $16}' | sort -n | tail -3
+
+# Latency to the services that made the home connection unusable.
+for h in ohyderabad1a.livekit.cloud api.deepgram.com api.minimax.io \
+         generativelanguage.googleapis.com api.groq.com; do
+  echo -n "$h "
+  curl -o /dev/null -s -w "connect=%{time_connect}s\n" "https://$h" 2>/dev/null || echo unreachable
+done
+```
+
+`aarch64` is a hard stop: `livekit-plugins-noise-cancellation` ships a proprietary
+native library with no published arm64 build, and the agent calls
+`noise_cancellation.BVCTelephony()`. There is no workaround short of removing noise
+cancellation.
+
+### Then harden
+
+```bash
 # Create a non-root user to run the services
 adduser --disabled-password --gecos "" clarivo
 
@@ -160,14 +192,18 @@ python3.12 -m venv agent/.venv
 ./agent/.venv/bin/pip install -r agent/requirements.txt
 ```
 
-Verify both import, and that numpy is present for the TTS limiter:
+Verify both import:
 
 ```bash
 ./.venv/bin/python -c "import backend.app; print('backend OK')"
 cd agent && ../agent/.venv/bin/python -c "import numpy, main; print('agent OK, numpy', numpy.__version__)"; cd ..
 ```
 
-If numpy is missing: `./agent/.venv/bin/pip install numpy`.
+This step used to end with "if numpy is missing, `pip install numpy`" — a workaround for
+the real problem, which was that `agent/minimax_tts.py` imports numpy while
+`agent/requirements.txt` never listed it. It only worked because livekit-agents and
+onnxruntime pull numpy in themselves. It is declared properly now, so a plain
+`pip install -r` is enough.
 
 ---
 
@@ -242,6 +278,24 @@ chmod 600 ~/AI-Calling-Agent/.env
 
 Also rotate, per the pre-launch checklist: the **WhatsApp access token** and the old
 **Supabase DB password**, both of which are still in git history.
+
+### Apply migrations (required, now that `DB_AUTO_SCHEMA=false`)
+
+With auto-schema off the app no longer creates or alters anything at boot, so this is
+the only thing that builds the schema. It has to run after `.env` exists, because
+Alembic reads the database URL from it:
+
+```bash
+cd ~/AI-Calling-Agent
+./.venv/bin/python -m alembic current        # where the database is now
+./.venv/bin/python -m alembic upgrade head   # apply anything outstanding
+./.venv/bin/python -m alembic check          # expect "No new upgrade operations detected"
+```
+
+For this first deployment the existing Supabase database is already at head, so
+`upgrade` is a no-op — but run it anyway, and run it on **every** deploy that ships a
+new migration. Skipping it is silent: the app starts fine and then fails on the first
+query that touches a missing column.
 
 ---
 
