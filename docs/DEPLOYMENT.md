@@ -28,18 +28,35 @@ LiveKit India region. This is the fix for the problems measured on the local set
 The reminder worker is **not** a separate service — `backend/app.py` starts it in its
 lifespan (`asyncio.create_task(reminder_loop())`).
 
-**No Redis, no Celery, no MongoDB.** `redis`, `celery` and `apscheduler` appear in
-`requirements.txt` but are never imported anywhere in the codebase. Rate limiting is
-in-memory (`backend/services/limiter.py` builds `Limiter(key_func=...)` with no
-`storage_uri`) and reminders are the in-process asyncio task above. `REDIS_URL` in
-`settings.py` is dead config. (`README.md` still describes a MongoDB + Celery stack —
-that is stale; the live stack is Postgres on Supabase.)
+**Redis IS required now.** This section used to say `REDIS_URL` was dead config. That
+stopped being true: `backend/services/limiter.py` uses Redis for rate-limit counters
+when `REDIS_URL` is reachable, and `backend/services/events.py` uses it as the
+cross-process notification bus. Both degrade instead of failing, so a missing Redis is
+easy to overlook — with these consequences:
+
+* Rate limits fall back to per-process memory, so a "10/minute" limit becomes 10 per
+  minute *per worker* and resets on every deploy. `check_production_config()` reports
+  this as a problem.
+* Dashboard notifications are delivered in-process only, so a browser connected to one
+  replica never hears an event published by another.
+
+It runs on the same VM (container or `apt install redis-server`), listening on
+localhost only, with `--requirepass`. Budget ~50 MB RAM. No separate machine.
+
+**Still not used: Celery and MongoDB.** `celery` and `apscheduler` are in
+`requirements.txt` but imported nowhere; reminders are the in-process asyncio task
+above. (`README.md` still describes a MongoDB + Celery stack — that is stale; the live
+stack is Postgres on Supabase.)
 
 ### VM requirements
 
 - **2 vCPU minimum**, 4 GB RAM, 40 GB disk. Measured idle usage is ~250 MB of
-  services (agent ~197 MB + backend ~51 MB) plus the OS; budget **~200 MB per
-  concurrent call** on top. The headroom is what you are paying for.
+  services (agent ~197 MB + backend ~51 MB) plus ~50 MB Redis plus the OS; budget
+  **~200 MB per concurrent call** on top. The headroom is what you are paying for.
+- **Real (dedicated) vCPU, not burstable/shared.** Voice is soft-real-time: audio is
+  encoded and decoded continuously, so CPU steal shows up as audible glitching rather
+  than as a slower page. On a shared-CPU plan watch `st` in `top` — consistently above
+  ~2-3% means the host is oversubscribed and no amount of tuning will fix the audio.
 - **x86_64 / AMD64.** NOT ARM/Graviton/Ampere — `livekit-plugins-noise-cancellation`
   is a proprietary native library without a published arm64 build, and the agent uses
   `noise_cancellation.BVCTelephony()`.
