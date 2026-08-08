@@ -9,6 +9,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from backend.services import events
+from backend.services import email as email_service
 from backend.services.db import connect_to_db, close_db_connection, get_sessionmaker
 from backend.services.limiter import limiter
 from backend.middlewares.security import (
@@ -51,6 +52,11 @@ async def lifespan(app: FastAPI):
     # Fail fast on insecure configuration BEFORE serving traffic. In production a
     # default JWT secret or wildcard CORS aborts the boot; elsewhere it warns.
     enforce_production_config()
+    # State the mail configuration outright. Email fails silently by design (a
+    # password reset reports success either way, so it cannot be used to discover
+    # which addresses are registered), which means a misconfigured mailer is
+    # invisible until a customer cannot get back into their account.
+    logger.info(f"Email: {email_service.describe_config()}")
     # Both workers self-elect via a Postgres advisory lock, so starting them in every
     # replica is safe — exactly one process actually runs each job. Critical for the
     # reminder worker: two senders means customers get duplicate WhatsApp messages.

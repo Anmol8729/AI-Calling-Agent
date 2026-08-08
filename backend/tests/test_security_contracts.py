@@ -463,6 +463,9 @@ class TestProductionConfigGuard:
             "AGENT_INTERNAL_SECRET": "y" * 48,
             "APP_BASE_URL": "https://app.clarivo.ai",
             "SMTP_HOST": "smtp.example.com",
+            # A configured mailer needs a sender it is allowed to send as, so the
+            # healthy baseline has to include one.
+            "SMTP_FROM": "Clarivo <no-reply@clarivo.ai>",
             "DB_AUTO_SCHEMA": False,
             # Real values, so the healthy case is genuinely healthy: the developer's
             # own .env has an ngrok SERVER_URL, which would otherwise make every test
@@ -500,6 +503,17 @@ class TestProductionConfigGuard:
         ngrok = "https://polio-ribcage-crate.ngrok-free.dev"
         assert "ngrok" in self._problems(monkeypatch, SERVER_URL=ngrok)
         assert "ngrok" not in self._problems(monkeypatch, SERVER_URL="https://api.clarivo.ai")
+
+    def test_smtp_without_a_verified_sender_is_flagged(self, monkeypatch):
+        """The nastiest mail failure: configured, no error logged, nothing arrives.
+        With SMTP_FROM and SMTP_USER both empty the From header falls back to a
+        hardcoded address on a domain the provider has not verified, so mail is
+        rejected or filed as spam silently."""
+        problems = self._problems(monkeypatch, SMTP_HOST="smtp.example.com", SMTP_FROM="", SMTP_USER="")
+        assert "SMTP_FROM" in problems
+
+        ok = self._problems(monkeypatch, SMTP_HOST="smtp.example.com", SMTP_FROM="a@b.com")
+        assert "SMTP_FROM" not in ok
 
     def test_these_checks_read_settings_not_os_environ(self):
         """The first version of the two checks above used os.getenv and therefore never

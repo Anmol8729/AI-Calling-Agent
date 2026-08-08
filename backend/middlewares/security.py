@@ -149,6 +149,17 @@ def check_production_config() -> list[str]:
             "so without verification whoever registers an allowlisted address first "
             "gains full access to every tenant. Set SMTP_HOST and friends."
         )
+    elif not (settings.SMTP_FROM or settings.SMTP_USER or "").strip():
+        # With neither set, send_email falls back to no-reply@clarivo.ai. Providers
+        # reject or spam-file a From address on a domain the account has not verified,
+        # so mail would appear to send and then never arrive — the worst failure mode,
+        # because nothing logs an error.
+        problems.append(
+            "SMTP_HOST is set but both SMTP_FROM and SMTP_USER are empty, so mail "
+            "would be sent From a hardcoded fallback address on a domain your provider "
+            "has probably not verified. It will be rejected or filed as spam with no "
+            "error anywhere. Set SMTP_FROM to an address you control."
+        )
 
     if not (settings.APP_BASE_URL or "").startswith("https://"):
         problems.append(
