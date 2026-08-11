@@ -117,9 +117,18 @@ cancellation.
 # Create a non-root user to run the services
 adduser --disabled-password --gecos "" clarivo
 
-# Firewall
-ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp
+# Firewall.
+#
+# READ THIS FIRST: allow the port SSH is ACTUALLY on. Many providers move sshd off
+# 22 to cut scanning noise. Hardcoding 22 here and enabling ufw kills your own
+# session the moment it applies, and you cannot ssh back in — recovery needs the
+# provider's console/VNC. Confirm the port before running the enable line:
+sshd -T 2>/dev/null | grep -E '^port ' || grep -E '^\s*Port ' /etc/ssh/sshd_config
+
+SSH_PORT=22            # <-- set this to what the command above printed
+ufw allow "${SSH_PORT}/tcp" && ufw allow 80/tcp && ufw allow 443/tcp
 ufw --force enable
+ufw status verbose     # confirm your SSH port is listed BEFORE you close this session
 
 timedatectl set-timezone Asia/Kolkata   # appointment_at is naive LOCAL time
 ```
