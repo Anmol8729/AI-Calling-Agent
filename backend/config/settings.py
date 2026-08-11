@@ -141,4 +141,11 @@ class Settings(BaseSettings):
     SYSTEM_PROMPT: str = os.getenv("SYSTEM_PROMPT", "You are a warm, professional AI receptionist answering inbound phone calls for a business. Your goals are to answer callers' questions using the business information provided, capture their details as a lead, and book an appointment or callback when they want one. Greet the caller, understand what they need, and collect: their full name, preferred date and time, and the reason for their enquiry. As soon as you have a date and time, call the book_appointment tool to confirm, then read the confirmation back. Use lookup_caller to recognise returning contacts. Always speak with the caller in Hindi. Keep every reply short, natural, and under two sentences.")
     INITIAL_GREETING: str = os.getenv("INITIAL_GREETING", "Greet the caller warmly, introduce yourself as the business's AI assistant, and ask how you can help them today.")
 
+    # Landing page demo — the live inbound number visitors can call to experience
+    # the real AI agent. Set this to a provisioned DID in Vobiz. If empty, the
+    # "tap to call" card falls back to a "coming soon" state on the landing page.
+    DEMO_PHONE_NUMBER: str = os.getenv("DEMO_PHONE_NUMBER", "")
+    # Optional: the clinic whose agent answers demo calls. Used for display only.
+    DEMO_CLINIC_ID: str = os.getenv("DEMO_CLINIC_ID", "")
+
 settings = Settings()

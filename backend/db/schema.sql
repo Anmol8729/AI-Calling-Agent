@@ -177,3 +177,16 @@ create table if not exists payments (
 create index if not exists ix_payments_clinic_id on payments(clinic_id);
 create index if not exists ix_payments_order_id on payments(razorpay_order_id);
 create index if not exists ix_payments_status on payments(status);
+
+-- ===== demo_requests (landing page callback leads) =====
+create table if not exists demo_requests (
+    id         uuid primary key default gen_random_uuid(),
+    name       varchar(255) not null,
+    phone      varchar(50)  not null,
+    email      varchar(255),
+    note       text,
+    status     varchar(20)  not null default 'pending',  -- pending | contacted | converted | dismissed
+    created_at timestamp    not null default (now() at time zone 'utc')
+);
+create index if not exists ix_demo_requests_status on demo_requests(status);
+create index if not exists ix_demo_requests_created_at on demo_requests(created_at);

@@ -23,7 +23,7 @@ from backend.services.db import get_db
 from backend.routes.auth import require_superadmin
 from backend.services.plans import list_plans, get_plan, effective_call_limit, is_valid_plan
 from backend.services import diagnostics
-from backend.models import Tenant, CallLog, User, UpgradeRequest
+from backend.models import Tenant, CallLog, User, UpgradeRequest, DemoRequest
 from backend.utils.helpers import api_response, to_uuid
 
 logger = logging.getLogger("admin-router")
@@ -210,3 +210,26 @@ async def resolve_upgrade_request(
     await db.commit()
     logger.info(f"Super-admin {current_user.get('email')} {req.status} upgrade request {rid}")
     return api_response(success=True, message=f"Request {req.status}", data={"id": str(rid), "status": req.status})
+
+
+# ----- Demo / callback leads ------------------------------------------------
+
+@router.get("/demo-requests")
+async def list_demo_requests(
+    current_user: dict = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all landing-page callback leads, newest first."""
+    rows = (await db.execute(
+        select(DemoRequest).order_by(DemoRequest.created_at.desc()).limit(200)
+    )).scalars().all()
+    data = [{
+        "id": str(r.id),
+        "name": r.name,
+        "phone": r.phone,
+        "email": r.email,
+        "note": r.note,
+        "status": r.status,
+        "createdAt": r.created_at.isoformat() if r.created_at else None,
+    } for r in rows]
+    return api_response(success=True, message="Demo requests fetched", data=data)
