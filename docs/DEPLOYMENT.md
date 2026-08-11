@@ -145,10 +145,32 @@ timedatectl set-timezone Asia/Kolkata   # appointment_at is naive LOCAL time
 apt update && apt upgrade -y
 apt install -y python3.12 python3.12-venv python3-pip git \
                build-essential ca-certificates curl debian-keyring \
-               debian-archive-keyring apt-transport-https
+               debian-archive-keyring apt-transport-https \
+               redis-server
 ```
 
-No `redis-server` — nothing in the codebase connects to it (see "What runs where").
+`redis-server` **is** needed — this line used to say the opposite. See "What runs where":
+the rate limiter and the notification bus both use it, and both degrade silently
+without it. Bind it to localhost and require a password:
+
+```bash
+# Generate a password and put the SAME value in .env as REDIS_PASSWORD.
+REDIS_PW="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+echo "REDIS_PASSWORD=${REDIS_PW}"      # copy this into .env
+
+printf 'bind 127.0.0.1 -::1\nprotected-mode yes\nrequirepass %s\n' "$REDIS_PW" \
+  | tee /etc/redis/redis.conf.d/clarivo.conf >/dev/null 2>&1 \
+  || printf '\nbind 127.0.0.1 -::1\nprotected-mode yes\nrequirepass %s\n' "$REDIS_PW" \
+     >> /etc/redis/redis.conf
+
+systemctl restart redis-server
+systemctl enable redis-server
+redis-cli -a "$REDIS_PW" ping        # expect PONG
+```
+
+Never publish 6379. It is reachable only from this machine, which is why a password
+plus `bind 127.0.0.1` is enough — an exposed Redis is the standard ransomware entry
+point, which is what C6 in the security tracker was about.
 
 Use **Python 3.12** (Ubuntu 24.04 default). Avoid 3.13: `audioop` was removed there,
 and `agent/minimax_tts.py` falls back to it when numpy is missing — losing the TTS
