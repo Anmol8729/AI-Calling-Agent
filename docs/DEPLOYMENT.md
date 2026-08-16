@@ -456,19 +456,41 @@ Caddy obtains and renews the certificate automatically — no cron, no certbot.
 
 ## 8. Frontend on Cloudflare Pages (free)
 
+The SPA needs **three** build-time variables, not one. Vite inlines `VITE_`-prefixed
+values into the bundle at build time, so they must be present when the build runs —
+setting them afterwards does nothing.
+
 ```bash
 cd frontend
-# Point the SPA at the deployed API. The variable is VITE_API_URL (see
-# frontend/.env.example) and it MUST include the /api suffix — the app appends
-# route paths directly to it, so omitting /api gives 404s on every call.
-echo "VITE_API_URL=https://api.yourdomain.com/api" > .env.production
+cat > .env.production <<'ENVEOF'
+# MUST include the /api suffix — the app appends route paths directly to it, so
+# omitting /api gives 404s on every call.
+VITE_API_URL=https://api.yourdomain.com/api
+# Both are required for Google sign-in. Without them the Supabase client is
+# constructed with undefined values and the Google button fails at runtime, while
+# email/password login keeps working — so it looks like a Google-only bug.
+VITE_SUPABASE_URL=https://<project-ref>.supabase.co
+VITE_SUPABASE_ANON_KEY=<the anon key, NOT the service role key>
+ENVEOF
 npm ci && npm run build      # outputs dist/
 ```
 
+Only the **anon** key belongs in a frontend build. It ends up in a file any visitor can
+download. The service role key bypasses Row Level Security and must never be given a
+`VITE_` name.
+
 In Cloudflare Pages: create a project → connect the repo (or upload `dist/`) →
 build command `npm run build`, output directory `dist`, root directory `frontend`,
-and set `VITE_API_URL=https://api.yourdomain.com/api` as a build environment
-variable. Then add `app.yourdomain.com` as a custom domain.
+and set all three variables above as build environment variables. Then add
+`app.yourdomain.com` as a custom domain.
+
+Verify after deploying, because a missing variable fails silently in the browser rather
+than at build time:
+
+```bash
+# The anon key should appear inlined in the built JS chunk that Supabase lives in.
+curl -s https://app.yourdomain.com/ | grep -o 'assets/[^"]*\.js' | head -3
+```
 
 ---
 
