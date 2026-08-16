@@ -558,11 +558,21 @@ error, because the send itself succeeded.
 Current free tiers, for a workload that is only resets and verification (a handful of
 messages a day):
 
-| Provider | Free tier | Notes |
-|---|---|---|
-| Brevo | [300/day, permanent](https://help.brevo.com/hc/en-us/articles/208580669-FAQs-What-are-the-limits-of-the-Free-plan) | plain SMTP relay, documented DKIM setup |
-| Resend | [100/day, 3,000/month](https://resend.com/docs/knowledge-base/account-quotas-and-limits) | better DX, still ample for resets |
-| Amazon SES | cheapest at scale, `ap-south-1` is in Mumbai | needs sandbox-exit approval first, so not same-day |
+| Provider | Free tier | SMTP host | Username / password |
+|---|---|---|---|
+| Brevo | [300/day, permanent](https://help.brevo.com/hc/en-us/articles/208580669-FAQs-What-are-the-limits-of-the-Free-plan) | `smtp-relay.brevo.com` | a separate `xxxxxx@smtp-brevo.com` login / an SMTP key |
+| Mailjet | [6,000/month, 200/day cap](https://documentation.mailjet.com/hc/en-us/articles/360043048393-What-is-this-200-emails-per-day-limit-on-free-accounts) | `in-v3.mailjet.com` | [API Key / Secret Key](https://documentation.mailjet.com/hc/en-us/articles/360043229473-How-can-I-configure-my-SMTP-parameters) |
+| Resend | [100/day, 3,000/month](https://resend.com/docs/knowledge-base/account-quotas-and-limits) | `smtp.resend.com` | `resend` / an API key |
+| Amazon SES | cheapest at scale, `ap-south-1` is in Mumbai | regional | needs sandbox-exit approval first, so not same-day |
+
+Whichever you pick, **the SMTP username is never your account email address.** Every one
+of these issues a separate credential pair, and using the dashboard login instead fails
+with `535 Authentication failed` — which reads like a wrong password rather than the
+wrong *kind* of credential.
+
+Volume is not the deciding factor here: this app sends password resets and email
+verification, a handful a day. Deliverability from your own domain is what matters, so
+do the DNS records below regardless of provider.
 
 SendGrid's free tier was withdrawn in 2025 — do not plan around it.
 
