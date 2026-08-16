@@ -91,6 +91,15 @@ ssh root@<VM_IP>
 uname -m                       # MUST be x86_64. aarch64 = wrong VM, stop here.
 lsb_release -ds                # expect Ubuntu 24.04
 nproc                          # >= 2
+
+# CPU INSTRUCTION SET — x86_64 alone is NOT enough. onnxruntime (pulled in by
+# livekit-plugins-silero for VAD) ships AVX kernels, and on a CPU without them the
+# agent dies instantly with SIGILL / "status=4/ILL" and core-dumps in a restart loop.
+# Nothing in the Python traceback tells you why, because it never gets to print.
+lscpu | grep -E "^Model name"   # "QEMU Virtual CPU version 2.5+" = generic qemu64, BAD
+for f in avx avx2 fma f16c; do
+  grep -qm1 " $f" /proc/cpuinfo && echo "  $f: YES" || echo "  $f: NO  <-- PROBLEM"
+done
 free -m  | awk '/Mem:/{print "RAM  " $2 " MB"}'      # >= 3800
 df -h /  | awk 'NR==2{print "disk " $2 " total, " $4 " free"}'   # >= 40G
 
@@ -110,6 +119,19 @@ done
 native library with no published arm64 build, and the agent calls
 `noise_cancellation.BVCTelephony()`. There is no workaround short of removing noise
 cancellation.
+
+**`avx: NO` is also a hard stop, and it is not something you can fix on the VM.** A
+model name of `QEMU Virtual CPU version 2.5+` means the host is running KVM/QEMU
+without CPU passthrough: instead of exposing the real processor's features it presents
+a generic `qemu64` model that predates AVX. Ask the provider to change the guest CPU
+mode to `host-passthrough` (or `host-model`, or any modern named model such as
+`Skylake-Client`/`EPYC`). It is a hypervisor setting on their side and needs a VM
+restart; no reinstall. Most providers already do this — one that does not will fail
+here and nowhere else, because the backend runs fine on a plain CPU.
+
+Note that `import`ing the libraries can succeed while the agent still dies: importing
+does not necessarily execute the vectorised kernels. The crash comes when a model is
+actually loaded or run, which is why this survives a naive import check.
 
 ### Then harden
 
