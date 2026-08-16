@@ -51,6 +51,10 @@ docs/SECURITY-REMEDIATION.md
 # demand. Repo bloat with no product value.
 docs/tts-compare/
 
+# Internal implementation plans. They describe gaps that are still open, so they
+# would tell a reader exactly what is not yet enforced.
+docs/PLAN-*.md
+
 # Local scratch script that loops through common Postgres passwords
 
 # against localhost. Harmless locally, but a password-guessing loop sitting in a
