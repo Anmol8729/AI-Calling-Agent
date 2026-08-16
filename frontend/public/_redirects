@@ -1,0 +1,12 @@
+# SPA fallback for static hosting (Cloudflare Pages, Netlify).
+#
+# React Router handles /dashboard, /login, /reset-password and the rest in the
+# browser, but the host looks for a FILE with that name first and there isn't one —
+# only index.html. Without this rule, opening any deep link directly, or simply
+# refreshing the page, returns 404. It works during `npm run dev` because Vite's dev
+# server already does this fallback, so the problem only appears once deployed.
+#
+# Static assets are matched before this rule, so /assets/* still serves real files.
+# Status 200 (not 301/302) so the URL the user sees is preserved and the router can
+# read it — a redirect would rewrite the address bar and lose the route.
+/*    /index.html   200
