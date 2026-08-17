@@ -29,6 +29,7 @@ from backend.routes.templates import router as templates_router
 from backend.routes.billing import router as billing_router
 from backend.routes.admin import router as admin_router
 from backend.routes.messages import router as messages_router
+from backend.routes.public import router as public_router
 from backend.websocket.handler import router as ws_router
 from backend.config.settings import settings
 
@@ -116,6 +117,7 @@ app.include_router(templates_router, prefix="/api")
 app.include_router(billing_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 app.include_router(messages_router, prefix="/api")
+app.include_router(public_router, prefix="/api")
 
 # Mount Websocket Routing
 app.include_router(ws_router)

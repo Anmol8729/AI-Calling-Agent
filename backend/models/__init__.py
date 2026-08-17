@@ -457,8 +457,26 @@ class WhatsAppMessage(Base):
     created_at = mapped_column(DateTime, nullable=False, default=datetime.utcnow, index=True)
 
 
+class DemoRequest(Base):
+    """Marketing lead captured from the landing page 'Request a callback' form.
+
+    Not tied to a tenant — this is a top-level record. Status lifecycle:
+      pending -> contacted -> converted | dismissed
+    """
+    __tablename__ = "demo_requests"
+
+    id = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = mapped_column(String(255), nullable=False)
+    phone = mapped_column(String(50), nullable=False)
+    email = mapped_column(String(255), nullable=True)
+    note = mapped_column(Text, nullable=True)
+    # pending | contacted | converted | dismissed
+    status = mapped_column(String(20), nullable=False, default="pending", index=True)
+    created_at = mapped_column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+
 __all__ = [
     "Base", "Tenant", "User", "Patient", "Appointment", "CallLog",
     "PasswordResetToken", "PhoneNumber", "UpgradeRequest", "Payment",
-    "WhatsAppMessage",
+    "WhatsAppMessage", "DemoRequest",
 ]
