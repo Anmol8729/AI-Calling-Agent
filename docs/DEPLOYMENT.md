@@ -456,13 +456,31 @@ Caddy obtains and renews the certificate automatically — no cron, no certbot.
 
 ## 8. Frontend on Cloudflare Pages (free)
 
-The SPA needs **three** build-time variables, not one. Vite inlines `VITE_`-prefixed
-values into the bundle at build time, so they must be present when the build runs —
-setting them afterwards does nothing.
+### Choose Git integration on the FIRST attempt
 
-```bash
-cd frontend
-cat > .env.production <<'ENVEOF'
+**A Direct Upload project can never be converted to Git.** Cloudflare's own docs say a
+new project is the only route, so switching later costs: a second project, moving the
+custom domain (the hostname cannot sit on two projects, so it must be removed from one
+before it is added to the other — that gap is real downtime), a re-issued certificate,
+and updating the CNAME at the DNS provider, because deleting the old project releases
+its `*.pages.dev` hostname. All of that was paid here. Connect the repo up front.
+
+Create → Pages → Connect to Git, then:
+
+| Setting | Value |
+|---|---|
+| Production branch | the branch you actually deploy |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+| **Root directory** | `frontend` |
+
+### The three build variables
+
+The SPA needs **three**, not one. Vite inlines `VITE_`-prefixed values into the bundle
+at build time, so they must be present when the build runs — setting them afterwards
+does nothing to an existing deployment.
+
+```
 # MUST include the /api suffix — the app appends route paths directly to it, so
 # omitting /api gives 404s on every call.
 VITE_API_URL=https://api.yourdomain.com/api
@@ -471,25 +489,54 @@ VITE_API_URL=https://api.yourdomain.com/api
 # email/password login keeps working — so it looks like a Google-only bug.
 VITE_SUPABASE_URL=https://<project-ref>.supabase.co
 VITE_SUPABASE_ANON_KEY=<the anon key, NOT the service role key>
-ENVEOF
-npm ci && npm run build      # outputs dist/
 ```
 
+Set them in the project's **Variables and secrets → Production**, Type **Text**.
+
 Only the **anon** key belongs in a frontend build. It ends up in a file any visitor can
-download. The service role key bypasses Row Level Security and must never be given a
-`VITE_` name.
+download, which is what `VITE_` means — the anon key is public by design and Row Level
+Security is what protects the data. The service role key bypasses RLS and must never be
+given a `VITE_` name.
 
-In Cloudflare Pages: create a project → connect the repo (or upload `dist/`) →
-build command `npm run build`, output directory `dist`, root directory `frontend`,
-and set all three variables above as build environment variables. Then add
-`app.yourdomain.com` as a custom domain.
+Three traps, all of which cost time here:
 
-Verify after deploying, because a missing variable fails silently in the browser rather
-than at build time:
+* **Saving a variable does not rebuild.** Automatic deployments fire on a git push, not
+  on a settings change. After editing a variable, go to Deployments and retry or create
+  one, or the live site keeps the old value baked in.
+* **Whitespace survives a paste.** A single leading space turned `VITE_SUPABASE_URL`
+  into `" https://…"`, which is silently wrong. Type short values by hand; for the
+  208-character anon key, clear the box completely (Ctrl+A, Delete) before pasting.
+* **A committed `frontend/.env.production` will be ignored.** Vite gives environment
+  variables that already exist the highest priority, and the dashboard's variables are
+  real environment variables during the build. Pick one mechanism; if you want the file
+  to win, delete the dashboard variables first.
+
+### Verify the built bundle, not the page
+
+A wrong or missing variable fails **silently**: Vite replaces the reference with
+`undefined`, the site still loads, routing still works, and email/password login still
+works. Only the Supabase-dependent path breaks. So "the dashboard opens" proves nothing.
+
+Checking `index.html` proves nothing either — it references a single entry chunk, and
+the Supabase SDK is deliberately behind a dynamic `import()`, so its chunk is reachable
+only from *inside* another chunk. A grep over `index.html` reported the anon key as
+missing when it was present, and later reported nothing when it was genuinely wrong.
+
+The check has to follow the lazy chunks and compare exact strings:
 
 ```bash
-# The anon key should appear inlined in the built JS chunk that Supabase lives in.
-curl -s https://app.yourdomain.com/ | grep -o 'assets/[^"]*\.js' | head -3
+BASE=https://app.yourdomain.com
+# Collect the entry chunks, then the chunks they import, and search the lot.
+JS=$(curl -s $BASE/ | grep -o 'assets/[^"]*\.js' | sort -u)
+ALL=$(for f in $JS; do curl -s "$BASE/$f"; done)
+JS2=$(printf '%s' "$ALL" | grep -o '"\./[A-Za-z0-9_.-]*\.js"' | tr -d '".' | sed 's|^/|assets/|' | sort -u)
+ALL="$ALL$(for f in $JS2; do curl -s "$BASE/$f"; done)"
+
+# Expect the exact values, with no surrounding whitespace inside the quotes.
+printf '%s' "$ALL" | grep -o '"[^"]*supabase\.co[^"]*"'
+printf '%s' "$ALL" | grep -o '"[^"]*/api[^"]*"' | head -3
+printf '%s' "$ALL" | grep -c 'eyJhbGciOi'      # the anon key JWT: expect >= 1
+printf '%s' "$ALL" | grep -c 'service_role'    # expect 0
 ```
 
 ---
