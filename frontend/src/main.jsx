@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import AppLayout from "./components/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
+import PublicOnlyRoute from "./components/PublicOnlyRoute";
 import SuperadminRoute from "./components/SuperadminRoute";
 import StaffRoute from "./components/StaffRoute";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -48,8 +49,17 @@ ReactDOM.createRoot(document.getElementById("root")).render(
                 session yet at this point, so it cannot sit behind ProtectedRoute. */}
             <Route path="/auth/callback" element={<AuthCallback />} />
             {/* Public marketing page. An exact "/" outranks the "/*" splat below,
-                so this matches the root path only. */}
-            <Route path="/" element={<Landing />} />
+                so this matches the root path only. Signed-in visitors are sent to the
+                dashboard instead: "/" is the URL existing customers have bookmarked,
+                and it took them to the dashboard before the landing page existed. */}
+            <Route
+              path="/"
+              element={
+                <PublicOnlyRoute>
+                  <Landing />
+                </PublicOnlyRoute>
+              }
+            />
             <Route
               path="/*"
               element={
