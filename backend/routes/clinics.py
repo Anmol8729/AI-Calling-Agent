@@ -29,7 +29,10 @@ class ClinicSettingsUpdate(BaseModel):
     knowledge_base: Optional[str] = None
     voice: Optional[str] = None
     language: Optional[str] = None
-    llm_model: Optional[str] = None
+    # llm_model is deliberately not accepted. The column still exists on tenants, but
+    # nothing has ever read it: the agent builds its LLM chain from AGENT_LLM_ORDER
+    # and the per-provider env vars. Accepting it meant the dashboard could store a
+    # model name and report success while the value changed nothing.
     whatsapp_phone_number_id: Optional[str] = None
     whatsapp_access_token: Optional[str] = None
     whatsapp_template_lang: Optional[str] = None

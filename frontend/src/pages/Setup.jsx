@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Save, Building2, Sparkles, MessageSquareCode, Languages, BookOpen,
-  ChevronDown, ChevronUp, Plus, PhoneCall, CalendarPlus, Mic2,
+  Plus, PhoneCall, CalendarPlus, Mic2,
 } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
@@ -62,7 +62,6 @@ export default function Setup() {
   const [behavior, setBehavior] = useState("");
   const [voice, setVoice] = useState("");
   const [voiceCustom, setVoiceCustom] = useState(false);
-  const [llmModel, setLlmModel] = useState("");
   const [knowledge, setKnowledge] = useState("");
 
   // WhatsApp config owns its own state and its own save, because its credentials are
@@ -72,7 +71,6 @@ export default function Setup() {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [status, setStatus] = useState(null); // { type, text }
 
   useEffect(() => {
@@ -91,7 +89,6 @@ export default function Setup() {
           setBehavior(d.system_prompt || "");
           setVoice(d.voice || "");
           setVoiceCustom(!!d.voice && !VOICES.some((v) => v.id === d.voice));
-          setLlmModel(d.llm_model || "");
           setKnowledge(d.knowledge_base || "");
         }
       })
@@ -129,7 +126,6 @@ export default function Setup() {
       initial_greeting: greeting,
       system_prompt: behavior,
       voice,
-      llm_model: llmModel,
       knowledge_base: knowledge,
       // WhatsApp fields are intentionally absent: they are saved by WhatsAppConfig
       // only after Meta accepts them. Sending them here too would let this Save
@@ -285,22 +281,10 @@ export default function Setup() {
         }}
       />
 
-      {/* Advanced */}
-      <section className="panel rounded-3xl border border-gray-100 bg-white shadow-sm">
-        <button
-          type="button"
-          className="flex w-full items-center justify-between p-6"
-          onClick={() => setShowAdvanced((v) => !v)}
-        >
-          <span className="text-lg font-semibold text-gray-950">Advanced</span>
-          {showAdvanced ? <ChevronUp className="h-5 w-5 text-gray-500" /> : <ChevronDown className="h-5 w-5 text-gray-500" />}
-        </button>
-        {showAdvanced && (
-          <div className="space-y-3 px-6 pb-6">
-            <Field label="AI model" value={llmModel} onChange={setLlmModel} placeholder="Default" hint="Leave blank to use the platform default." />
-          </div>
-        )}
-      </section>
+      {/* The "Advanced > AI model" field was removed: nothing ever read
+          tenants.llm_model. The agent builds its LLM chain from AGENT_LLM_ORDER and
+          the per-provider env vars, so a model typed here was stored and ignored
+          while the page still answered "Saved. Changes apply on the next call." */}
 
       <div className="flex justify-end">
         <Button onClick={handleSave} disabled={saving || loading}>
