@@ -96,6 +96,13 @@ class Tenant(Base):
     whatsapp_template_lang = mapped_column(String(20), nullable=True)
     whatsapp_confirm_template = mapped_column(String(100), nullable=True)
     whatsapp_reminder_template = mapped_column(String(100), nullable=True)
+    # When these credentials last passed a live check against the Cloud API.
+    # NULL means "never verified", which is what the dashboard shows as
+    # "Not Connected". It is NOT the same as "a token is stored" — a stored token
+    # can still be expired or point at a number this app cannot see, so the badge
+    # has to reflect a real probe. Cleared whenever the id or token changes,
+    # otherwise the badge would keep vouching for credentials nobody checked.
+    whatsapp_verified_at = mapped_column(DateTime, nullable=True)
     did = mapped_column(String(50), nullable=True, unique=True)
     system_prompt = mapped_column(Text, nullable=True)
     initial_greeting = mapped_column(Text, nullable=True)

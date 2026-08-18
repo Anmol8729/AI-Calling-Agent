@@ -90,6 +90,75 @@ async def send_template(config: dict, to_phone: str, template_name: str, params)
         return False
 
 
+async def verify_credentials(phone_number_id: str, access_token: str):
+    """Check a phone number ID + access token pair against the Cloud API.
+
+    Returns ``(ok, error_message, info)``. ``info`` carries the number Meta has on
+    file (``display_phone_number``, ``verified_name``) so the dashboard can show
+    WHICH number it just connected instead of only a green tick.
+
+    Reads the phone number object rather than sending anything: a send would need an
+    approved template and a real recipient, and would cost the tenant a message just
+    to test a credential. A GET is free and fails for exactly the two reasons worth
+    telling the user apart — a bad token and a bad/invisible phone number ID.
+
+    Never raises, and never logs the token. Only the id is safe to log.
+    """
+    phone_number_id = (phone_number_id or "").strip()
+    access_token = (access_token or "").strip()
+    if not phone_number_id:
+        return False, "Enter your WhatsApp Business Phone Number ID.", None
+    if not access_token:
+        return False, "Enter your WhatsApp Cloud API access token.", None
+
+    url = f"https://graph.facebook.com/{settings.WHATSAPP_API_VERSION}/{phone_number_id}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                url,
+                params={"fields": "display_phone_number,verified_name,quality_rating"},
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+    except httpx.TimeoutException:
+        return False, "WhatsApp did not respond in time. Try again in a moment.", None
+    except Exception as e:
+        logger.warning(f"WhatsApp verify error for id={phone_number_id}: {type(e).__name__}")
+        return False, "Could not reach WhatsApp. Check your connection and try again.", None
+
+    if resp.status_code == 200:
+        data = resp.json() if resp.content else {}
+        logger.info(f"WhatsApp credentials verified for id={phone_number_id}")
+        return True, None, {
+            "display_phone_number": data.get("display_phone_number"),
+            "verified_name": data.get("verified_name"),
+            "quality_rating": data.get("quality_rating"),
+        }
+
+    # Meta replies {"error": {"message": ..., "code": ..., "type": ...}}.
+    detail = ""
+    try:
+        detail = ((resp.json() or {}).get("error") or {}).get("message") or ""
+    except Exception:
+        detail = ""
+    detail = detail.strip()[:300]
+
+    # Status alone cannot separate the two causes: Meta answers 404 both for a
+    # phone number id that does not exist AND for one this token cannot see.
+    if resp.status_code in (401, 403):
+        message = "WhatsApp rejected the access token. Generate a new permanent token and paste it again."
+    elif resp.status_code == 404:
+        message = "WhatsApp could not find that Phone Number ID with this token. Check both values."
+    elif resp.status_code == 429:
+        message = "WhatsApp is rate limiting this app. Wait a minute and try again."
+    else:
+        message = "WhatsApp rejected these credentials."
+    if detail:
+        message = f"{message} Meta said: {detail}"
+
+    logger.warning(f"WhatsApp verify failed {resp.status_code} for id={phone_number_id}")
+    return False, message, None
+
+
 async def send_appointment_confirmation(config: dict, to_phone: str, name: str, business: str, when: str) -> bool:
     return await send_template(
         config, to_phone, (config or {}).get("confirm_template"),

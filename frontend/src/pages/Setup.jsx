@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Save, Building2, Sparkles, MessageSquareCode, Languages, BookOpen,
-  ChevronDown, ChevronUp, Plus, PhoneCall, MessageCircle, CalendarPlus, Mic2,
+  ChevronDown, ChevronUp, Plus, PhoneCall, CalendarPlus, Mic2,
 } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
+import { Section, Label, Hint, Field } from "../components/ui/Form";
+import WhatsAppConfig from "../components/WhatsAppConfig";
 import Modal from "../components/Modal";
 import DataTable from "../components/DataTable";
 import { INDUSTRIES } from "../lib/industries";
@@ -63,13 +65,9 @@ export default function Setup() {
   const [llmModel, setLlmModel] = useState("");
   const [knowledge, setKnowledge] = useState("");
 
-  // WhatsApp (per-tenant Meta Cloud API)
-  const [waPhoneId, setWaPhoneId] = useState("");
-  const [waToken, setWaToken] = useState("");
-  const [waTokenSet, setWaTokenSet] = useState(false);
-  const [waLang, setWaLang] = useState("");
-  const [waConfirmTpl, setWaConfirmTpl] = useState("");
-  const [waReminderTpl, setWaReminderTpl] = useState("");
+  // WhatsApp config owns its own state and its own save, because its credentials are
+  // verified with Meta before being stored. It only needs the fetched settings.
+  const [settings, setSettings] = useState(null);
 
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -83,6 +81,7 @@ export default function Setup() {
         if (res.data?.success) {
           const d = res.data.data;
           useClinicStore.getState().setClinic(d);
+          setSettings(d);
           setName(d.name || "");
           setIndustry(d.industry || "");
           setBookingMode(d.booking_mode || "time");
@@ -94,11 +93,6 @@ export default function Setup() {
           setVoiceCustom(!!d.voice && !VOICES.some((v) => v.id === d.voice));
           setLlmModel(d.llm_model || "");
           setKnowledge(d.knowledge_base || "");
-          setWaPhoneId(d.whatsapp_phone_number_id || "");
-          setWaTokenSet(!!d.whatsapp_access_token_set);
-          setWaLang(d.whatsapp_template_lang || "");
-          setWaConfirmTpl(d.whatsapp_confirm_template || "");
-          setWaReminderTpl(d.whatsapp_reminder_template || "");
         }
       })
       .catch(() => {})
@@ -137,16 +131,17 @@ export default function Setup() {
       voice,
       llm_model: llmModel,
       knowledge_base: knowledge,
-      whatsapp_phone_number_id: waPhoneId,
-      whatsapp_access_token: waToken, // blank = keep existing (backend skips)
-      whatsapp_template_lang: waLang,
-      whatsapp_confirm_template: waConfirmTpl,
-      whatsapp_reminder_template: waReminderTpl,
+      // WhatsApp fields are intentionally absent: they are saved by WhatsAppConfig
+      // only after Meta accepts them. Sending them here too would let this Save
+      // overwrite verified credentials with whatever the form last held, and would
+      // clear the verified flag on every unrelated edit.
     })
       .then((res) => {
         if (res.data?.success) {
-          if (res.data.data) useClinicStore.getState().setClinic(res.data.data);
-          if (waToken) { setWaTokenSet(true); setWaToken(""); }
+          if (res.data.data) {
+            useClinicStore.getState().setClinic(res.data.data);
+            setSettings(res.data.data);
+          }
           setStatus({ type: "success", text: "Saved. Changes apply on the next call." });
         } else {
           setStatus({ type: "error", text: res.data?.message || "Failed to save." });
@@ -279,31 +274,16 @@ export default function Setup() {
         </div>
       </Section>
 
-      {/* WhatsApp */}
-      <Section icon={MessageCircle} title="WhatsApp notifications">
-        <p className="text-sm text-gray-500">
-          Send appointment confirmations and reminders from your own WhatsApp number (Meta Cloud API).
-          Leave blank to use the platform default. Templates must be approved in Meta Business Manager.
-        </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="WhatsApp phone number ID" value={waPhoneId} onChange={setWaPhoneId} placeholder="e.g. 123456789012345" />
-          <div>
-            <Label>Access token {waTokenSet ? <span className="text-emerald-600">· connected</span> : null}</Label>
-            <input
-              type="password"
-              className="mt-1 w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
-              value={waToken}
-              onChange={(e) => setWaToken(e.target.value)}
-              placeholder={waTokenSet ? "•••••••• (leave blank to keep)" : "Paste your permanent token"}
-            />
-            <Hint>Stored securely and never shown again. Leave blank to keep the current token.</Hint>
-          </div>
-          <Field label="Template language" value={waLang} onChange={setWaLang} placeholder="en_US or hi" />
-          <div className="hidden sm:block" />
-          <Field label="Confirmation template name" value={waConfirmTpl} onChange={setWaConfirmTpl} placeholder="appointment_confirmation" />
-          <Field label="Reminder template name" value={waReminderTpl} onChange={setWaReminderTpl} placeholder="appointment_reminder" />
-        </div>
-      </Section>
+      {/* WhatsApp — verifies with Meta and saves itself, so it sits outside the
+          page-wide Save below. */}
+      <WhatsAppConfig
+        settings={settings}
+        disabled={loading}
+        onSaved={(d) => {
+          useClinicStore.getState().setClinic(d);
+          setSettings(d);
+        }}
+      />
 
       {/* Advanced */}
       <section className="panel rounded-3xl border border-gray-100 bg-white shadow-sm">
@@ -544,41 +524,5 @@ function PhoneNumbersSection() {
   );
 }
 
-function Section({ icon: Icon, title, action, children }) {
-  return (
-    <section className="panel rounded-3xl border border-gray-100 bg-white p-6 shadow-sm space-y-4">
-      <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-        <div className="flex items-center gap-2">
-          {Icon && <Icon className="h-5 w-5 text-gray-500" />}
-          <h2 className="text-lg font-semibold text-gray-950">{title}</h2>
-        </div>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function Label({ children }) {
-  return <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">{children}</label>;
-}
-
-function Hint({ children }) {
-  return <p className="mt-1 text-xs text-gray-400">{children}</p>;
-}
-
-function Field({ label, value, onChange, placeholder, hint }) {
-  return (
-    <div>
-      <Label>{label}</Label>
-      <input
-        type="text"
-        className="mt-1 w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-      />
-      {hint && <Hint>{hint}</Hint>}
-    </div>
-  );
-}
+// Section / Label / Hint / Field now live in components/ui/Form.jsx — WhatsAppConfig
+// needs the same inputs, and two copies of them would drift apart.
