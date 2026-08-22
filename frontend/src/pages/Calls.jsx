@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw, Radio, Search, FileText, Download } from "lucide-react";
 import api from "../lib/api";
+import CallFilterBar from "../components/CallFilterBar";
+import { buildCallFilter, EMPTY_FILTERS } from "../lib/callFilters";
 import DataTable from "../components/DataTable";
 import Modal from "../components/Modal";
 import { Badge } from "../components/ui/Badge";
@@ -33,6 +35,11 @@ export default function Calls() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
+  // Two copies on purpose: `draft` is what the filter bar edits, `applied` is what the
+  // table filters by. That is what makes "Apply Filters" a real action. The search box
+  // stays live, as it was before.
+  const [draft, setDraft] = useState(EMPTY_FILTERS);
+  const [applied, setApplied] = useState(EMPTY_FILTERS);
   const [selected, setSelected] = useState(null); // call whose transcript is open
 
   const refresh = useCallback(async () => {
@@ -56,10 +63,27 @@ export default function Calls() {
       .finally(() => setLoading(false));
   }, []);
 
-  const filtered = useMemo(
-    () => logs.filter((l) => `${l.caller} ${l.phone} ${l.status}`.toLowerCase().includes(query.toLowerCase())),
-    [query, logs],
+  // Offer only statuses that actually occur in this tenant's history. A fixed list
+  // would advertise outcomes the backend never writes, so choosing one would return an
+  // empty table with no explanation.
+  const statusOptions = useMemo(
+    () => [...new Set(logs.map((l) => (l.status || "").trim()).filter(Boolean))].sort(),
+    [logs],
   );
+
+  // The original search predicate, extended with the filter bar rather than replaced,
+  // so both narrow the same list and combining them needs no special cases.
+  const filtered = useMemo(
+    () => logs.filter(buildCallFilter(applied, query)),
+    [query, logs, applied],
+  );
+
+  const filtersActive = Object.values(applied).some(Boolean) || !!query.trim();
+
+  const clearFilters = () => {
+    setDraft(EMPTY_FILTERS);
+    setApplied(EMPTY_FILTERS);
+  };
 
   const downloadCall = (row) => {
     const payload = {
@@ -144,6 +168,16 @@ export default function Calls() {
         )}
       </section>
 
+      {/* Filters sit above the Call history heading, matching the reference. */}
+      <CallFilterBar
+        value={draft}
+        onChange={setDraft}
+        onApply={() => setApplied(draft)}
+        onClear={clearFilters}
+        statusOptions={statusOptions}
+        disabled={loading}
+      />
+
       {/* Call history */}
       <section className="space-y-3">
         <h2 className="text-lg font-semibold text-gray-950">Call history</h2>
@@ -158,7 +192,20 @@ export default function Calls() {
             />
           </label>
         </div>
-        <DataTable columns={columns} rows={filtered} loading={loading} emptyTitle="No calls yet" />
+        {/* Without this, a filter that matches nothing is indistinguishable from a
+            tenant who has taken no calls. */}
+        {filtersActive && !loading && (
+          <p className="text-xs text-gray-500" aria-live="polite">
+            Showing {filtered.length} of {logs.length} calls
+          </p>
+        )}
+        <DataTable
+          columns={columns}
+          rows={filtered}
+          loading={loading}
+          emptyTitle={filtersActive ? "No calls match these filters" : "No calls yet"}
+          {...(filtersActive ? { emptyDescription: "Try widening the date range or clearing a filter." } : {})}
+        />
       </section>
 
       <Modal
