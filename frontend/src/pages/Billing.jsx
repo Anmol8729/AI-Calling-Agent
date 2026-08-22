@@ -6,20 +6,8 @@ import Modal from "../components/Modal";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { useLabels } from "../store/clinicStore";
-
-const nf = new Intl.NumberFormat("en-IN");
-
-function formatPrice(priceInr) {
-  if (priceInr === null || priceInr === undefined) return "Pricing on request";
-  if (priceInr === 0) return "Free";
-  return `₹${nf.format(priceInr)}/mo`;
-}
-
-function barTone(percent) {
-  if (percent >= 100) return "bg-red-500";
-  if (percent >= 75) return "bg-amber-500";
-  return "bg-emerald-500";
-}
+import { useBillingStore, useBillingSummary } from "../store/billingStore";
+import { nf, formatPrice } from "../lib/money";
 
 // Load the Razorpay Checkout script once, on demand.
 function loadRazorpayScript() {
@@ -35,8 +23,9 @@ function loadRazorpayScript() {
 
 export default function Billing() {
   const labels = useLabels();
+  // Shared with the Dashboard's Current Plan card, so an upgrade shows up on both.
+  const { summary } = useBillingSummary();
   const [overview, setOverview] = useState(null);
-  const [summary, setSummary] = useState(null);
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [banner, setBanner] = useState(null); // { type, text }
@@ -50,7 +39,9 @@ export default function Billing() {
   const load = useCallback(async () => {
     setLoading(true);
     await Promise.all([
-      api.get("/billing/summary").then((r) => (r.data?.success ? setSummary(r.data.data) : null)).catch(() => {}),
+      // The summary itself comes from billingStore (fetched once, shared with the
+      // Dashboard); force it so a just-completed payment is reflected here.
+      useBillingStore.getState().fetchSummary(true),
       api.get("/billing/plans").then((r) => (r.data?.success ? setPlans(r.data.data || []) : null)).catch(() => {}),
       api.get("/stats/overview").then((r) => (r.data?.success ? setOverview(r.data.data) : null)).catch(() => {}),
     ]);
@@ -64,12 +55,7 @@ export default function Billing() {
   const totals = overview?.totals || {};
   const calls = overview?.calls || {};
   const plan = summary?.plan || {};
-  const usage = summary?.usage || {};
   const paymentsEnabled = !!summary?.paymentsEnabled;
-  const limit = usage.monthlyCallLimit ?? 0;
-  const used = usage.callsUsed ?? 0;
-  const remaining = usage.callsRemaining ?? 0;
-  const percent = usage.percentUsed ?? 0;
 
   const payAndUpgrade = async (planKey) => {
     setBanner(null);
@@ -144,8 +130,10 @@ export default function Billing() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-semibold tracking-tight text-gray-950">Plan &amp; Usage</h1>
-        <p className="mt-2 text-sm text-gray-500">Your subscription plan and this month's call usage.</p>
+        <h1 className="text-3xl font-semibold tracking-tight text-gray-950">Plans</h1>
+        <p className="mt-2 text-sm text-gray-500">
+          Plans are priced by monthly call volume. Your current plan and usage are on the Dashboard.
+        </p>
       </div>
 
       {banner && (
@@ -161,57 +149,11 @@ export default function Billing() {
         </div>
       )}
 
-      {/* Current plan + monthly call usage */}
-      <article className="panel rounded-3xl p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Current plan</span>
-            <div className="mt-2 flex items-center gap-3">
-              <p className="text-2xl font-semibold text-gray-950">{loading ? "…" : (plan.name || "Trial")}</p>
-              {plan.customAllowance && <Badge tone="warning">Custom allowance</Badge>}
-            </div>
-            <p className="mt-1 text-sm text-gray-500">
-              {loading ? "" : `${nf.format(limit)} calls / month · ${formatPrice(plan.priceInr)}`}
-            </p>
-          </div>
-          <Badge tone="dark">Active</Badge>
-        </div>
-
-        <div className="mt-6">
-          <div className="flex items-end justify-between text-sm">
-            <span className="font-medium text-gray-950">
-              {loading ? "…" : `${nf.format(used)} of ${nf.format(limit)} calls used`}
-            </span>
-            <span className="text-gray-500">{usage.periodLabel || ""}</span>
-          </div>
-          <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-gray-100">
-            <div
-              className={`h-full rounded-full transition-all ${barTone(percent)}`}
-              style={{ width: `${Math.min(percent, 100)}%` }}
-            />
-          </div>
-          <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
-            <span>{percent}% used</span>
-            <span>{nf.format(remaining)} calls remaining</span>
-          </div>
-          {percent >= 80 && percent < 100 && (
-            <p className="mt-3 rounded-2xl border border-amber-100 bg-amber-50 p-3 text-xs text-amber-800">
-              You've used {percent}% of this month's call allowance. Consider upgrading before you run out.
-            </p>
-          )}
-          {percent >= 100 && (
-            <p className="mt-3 rounded-2xl border border-red-100 bg-red-50 p-3 text-xs text-red-800">
-              This month's call allowance is used up. Upgrade the plan to add capacity.
-            </p>
-          )}
-        </div>
-      </article>
-
-      {/* Plan comparison (call-volume tiers) */}
+      {/* Plan comparison (call-volume tiers). The Current Plan / usage card that used
+          to sit above this now lives on the Dashboard, driven by the same
+          billingStore — see components/CurrentPlanCard.jsx. */}
       <section>
-        <h2 className="text-lg font-semibold text-gray-950">Plans</h2>
-        <p className="mt-1 text-sm text-gray-500">Plans are priced by monthly call volume.</p>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {plans.map((p) => {
             const isCurrent = p.key === plan.key;
             const canPay = paymentsEnabled && p.price_inr > 0;

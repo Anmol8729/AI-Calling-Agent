@@ -5,6 +5,7 @@ import { Activity, CalendarCheck, CheckCircle2, Circle, PhoneCall, Target, Timer
 import api from "../lib/api";
 import { useLabels } from "../store/clinicStore";
 import ChartCard from "../components/ChartCard";
+import CurrentPlanCard from "../components/CurrentPlanCard";
 import DataTable from "../components/DataTable";
 import StatCard from "../components/StatCard";
 import { Badge } from "../components/ui/Badge";
@@ -85,6 +86,10 @@ export default function Dashboard() {
         <h1 className="mt-1 text-3xl font-semibold tracking-tight text-gray-950">Dashboard</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-500">A live view of calls, appointments, and your AI receptionist's activity.</p>
       </div>
+
+      {/* Plan + allowance. Reads billingStore, the same cached /billing/summary the
+          Billing page uses, so the two screens cannot disagree. */}
+      <CurrentPlanCard />
 
       {showChecklist && (
         <section className="panel rounded-3xl border border-gray-100 bg-white p-6 shadow-sm">
