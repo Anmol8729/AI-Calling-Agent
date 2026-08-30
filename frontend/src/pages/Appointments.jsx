@@ -1,15 +1,25 @@
-import { CalendarDays, CalendarPlus, Trash2 } from "lucide-react";
+import {
+  CalendarDays, CalendarPlus, ChevronDown, ChevronUp, Clock, Download, Loader2, RotateCcw,
+  Search, SlidersHorizontal, Trash2,
+} from "lucide-react";
 import { useMemo, useState, useEffect, useCallback } from "react";
 import api from "../lib/api";
 import DataTable from "../components/DataTable";
 import Modal from "../components/Modal";
+import Pagination from "../components/Pagination";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
+import { avatarTone, initialOf } from "../lib/avatar";
+import { dateStamp, downloadCsv, toCsv } from "../lib/csv";
+import {
+  buildAppointmentFilter, dateKeyOf, DATE_PRESETS, resolveDateRange, shiftDays,
+} from "../lib/appointmentFilters";
 import { useLabels, useClinicStore } from "../store/clinicStore";
 import { useAuthStore } from "../store/authStore";
 
 const emptyForm = { patient_name: "", phone: "", appointment_at: "", duration_min: 30, reason: "" };
 const DURATIONS = [15, 30, 45, 60, 90];
+const PAGE_SIZES = [10, 25, 50];
 
 function extractError(err) {
   const d = err?.response?.data;
@@ -44,26 +54,16 @@ const fmtWhen = (row) => {
   return row.appointment_date || "—";
 };
 
-// Local YYYY-MM-DD. Deliberately NOT toISOString().slice(0,10): that converts to
-// UTC first, so a 00:30 IST booking would be filed under the previous day.
-const toDateKey = (d) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+// toDateKey / dateKeyOf / shiftDays now live in lib/appointmentFilters.js — the filter
+// predicate needs the same definitions, and two copies of date-key logic would drift.
 
-// Which day a row belongs to. Time mode has a real timestamp; token mode only has
-// token_date. Rows with neither (legacy imports) group under "" and sort last.
-const dateKeyOf = (row) => {
+// Time only, for the table's own column. The full date is already the group heading.
+const fmtTime = (row) => {
   if (row.appointment_at) {
     const d = new Date(row.appointment_at);
-    if (!Number.isNaN(d.getTime())) return toDateKey(d);
+    if (!Number.isNaN(d.getTime())) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
-  if (row.token_date) return String(row.token_date).slice(0, 10);
-  return "";
-};
-
-const shiftDays = (n) => {
-  const d = new Date();
-  d.setDate(d.getDate() + n);
-  return toDateKey(d);
+  return "—";
 };
 
 // "Today" / "Tomorrow" are what people scan for; anything else gets a full date.
@@ -81,6 +81,20 @@ const groupLabel = (key) => {
   });
 };
 
+// Only fields an Appointment actually carries. No Email, Doctor or Source column: an
+// appointment record has none of those, and inventing them would put made-up data in a
+// file people will treat as a record. No id or clinic_id either — internal keys.
+const CSV_COLUMNS = [
+  { header: "Token", value: (r) => (r.token_number != null ? r.token_number : "") },
+  { header: "Name", value: (r) => r.patient_name },
+  { header: "Phone", value: (r) => r.phone || "" },
+  { header: "Reason", value: (r) => r.reason || "" },
+  { header: "Date", value: (r) => dateKeyOf(r) },
+  { header: "Time", value: (r) => (fmtTime(r) === "—" ? "" : fmtTime(r)) },
+  { header: "Length (min)", value: (r) => r.duration_min || "" },
+  { header: "Status", value: (r) => r.status || "" },
+];
+
 export default function Appointments() {
   const labels = useLabels();
   const bookingMode = useClinicStore((s) => s.clinic?.booking_mode) || "time";
@@ -92,7 +106,14 @@ export default function Appointments() {
   const isStaff = user?.role === "staff";
   const [list, setList] = useState([]);
   const [query, setQuery] = useState("");
-  const [dateFilter, setDateFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [datePreset, setDatePreset] = useState("all");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
+  const [exporting, setExporting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [live, setLive] = useState(false);
 
@@ -210,24 +231,77 @@ export default function Appointments() {
     setOpen(true);
   };
 
-  const filtered = useMemo(
-    () =>
-      list.filter((a) => {
-        const matchesText = `${a.patient_name} ${a.reason || ""} ${a.status} ${fmtWhen(a)}`
-          .toLowerCase()
-          .includes(query.toLowerCase());
-        const matchesDate = !dateFilter || dateKeyOf(a) === dateFilter;
-        return matchesText && matchesDate;
-      }),
-    [query, dateFilter, list],
+  // Statuses offered come from the data, so the filter can never advertise one that no
+  // row has and then return an empty list with no explanation.
+  const statusOptions = useMemo(
+    () => [...new Set(list.map((a) => (a.status || "").trim()).filter(Boolean))].sort(),
+    [list],
   );
+
+  const range = useMemo(
+    () => resolveDateRange(datePreset, customFrom, customTo),
+    [datePreset, customFrom, customTo],
+  );
+
+  // fmtWhen is passed in so searching the displayed date string keeps working as before.
+  const filtered = useMemo(
+    () => list.filter(buildAppointmentFilter({ query, status: statusFilter, ...range }, fmtWhen)),
+    [list, query, statusFilter, range],
+  );
+
+  const filtersActive = !!(query.trim() || statusFilter || datePreset !== "all");
+
+  const clearAll = () => {
+    setQuery("");
+    setStatusFilter("");
+    setDatePreset("all");
+    setCustomFrom("");
+    setCustomTo("");
+    setPage(1);
+  };
+
+  // Clamped during render rather than reset from an effect: a narrower result set can be
+  // shorter than the current offset and the page must be valid on this same render.
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const paged = useMemo(
+    () => filtered.slice((safePage - 1) * pageSize, safePage * pageSize),
+    [filtered, safePage, pageSize],
+  );
+
+  // Exports `filtered`, never `paged`: every matching row across all pages.
+  const exportCsv = () => {
+    setBanner(null);
+    if (filtered.length === 0) {
+      setBanner({ type: "error", text: `No ${labels.bookings.toLowerCase()} found to export.` });
+      return;
+    }
+    setExporting(true);
+    try {
+      const slug = labels.bookings.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      downloadCsv(`clarivo-${slug}-${dateStamp()}.csv`, toCsv(CSV_COLUMNS, filtered));
+      setBanner({
+        type: "success",
+        text: `Exported ${filtered.length} ${labels.bookings.toLowerCase()}${
+          filtersActive ? " matching the current filters" : ""
+        }.`,
+      });
+    } catch {
+      setBanner({ type: "error", text: `Unable to export ${labels.bookings.toLowerCase()}. Please try again.` });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // One section per date. Sorted ascending so the nearest day is at the top, with
   // undated rows last — the list arrives ordered by time, so rows inside a group
   // keep that order for free.
+  // Groups are built from the CURRENT PAGE, so "Showing 1 to 10 of N" counts
+  // appointments rather than date sections, and a group is never split across pages in a
+  // way that shows a heading with no rows under it.
   const groups = useMemo(() => {
     const buckets = new Map();
-    for (const row of filtered) {
+    for (const row of paged) {
       const key = dateKeyOf(row);
       if (!buckets.has(key)) buckets.set(key, []);
       buckets.get(key).push(row);
@@ -240,13 +314,7 @@ export default function Appointments() {
         return a < b ? -1 : 1;
       })
       .map(([key, rows]) => ({ key, rows, label: groupLabel(key) }));
-  }, [filtered]);
-
-  // Dates that actually have bookings, for the quick-jump chips.
-  const availableDates = useMemo(() => {
-    const keys = new Set(list.map(dateKeyOf).filter(Boolean));
-    return [...keys].sort();
-  }, [list]);
+  }, [paged]);
 
   const updateField = (key) => (event) => setForm((prev) => ({ ...prev, [key]: event.target.value }));
 
@@ -390,35 +458,95 @@ export default function Appointments() {
       }
 
       return (
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           {!isToken && (
             <Button variant="secondary" size="sm" onClick={() => openReschedule(row)}>Reschedule</Button>
           )}
           <Button variant="secondary" size="sm" disabled={busyId === row.id} onClick={() => setConfirmRow(row)}>
             {busyId === row.id ? "..." : "Cancel"}
           </Button>
-          <Button variant="danger" size="sm" disabled={busyId === row.id} onClick={() => setDeleteRow(row)}>
-            <Trash2 className="h-3.5 w-3.5" /> Delete
-          </Button>
+          {/* Icon-only, so Cancel reads as the ordinary action and delete does not
+              compete with it. Same confirmation modal as before. */}
+          <button
+            type="button"
+            disabled={busyId === row.id}
+            onClick={() => setDeleteRow(row)}
+            title={`Delete ${row.patient_name}'s ${labels.booking.toLowerCase()}`}
+            aria-label={`Delete ${row.patient_name}'s ${labels.booking.toLowerCase()}`}
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-gray-200 text-gray-400 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-40"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
         </div>
       );
     },
   };
 
+  const tokenColumn = {
+    key: "token_number",
+    header: "Token",
+    render: (row) =>
+      row.token_number != null ? (
+        <span className="inline-flex items-center rounded-full bg-violet-50 px-2.5 py-1 text-xs font-semibold tabular-nums text-violet-700 ring-1 ring-violet-100">
+          #{row.token_number}
+        </span>
+      ) : (
+        "—"
+      ),
+  };
+
+  const nameColumn = {
+    key: "patient_name",
+    header: "Name",
+    render: (row) => (
+      <div className="flex items-center gap-2.5">
+        <span
+          className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-xs font-semibold ${avatarTone(row.patient_name)}`}
+          aria-hidden="true"
+        >
+          {initialOf(row.patient_name)}
+        </span>
+        <span className="font-medium text-gray-950">{row.patient_name}</span>
+      </div>
+    ),
+  };
+
+  const reasonColumn = {
+    key: "reason",
+    header: "Reason",
+    render: (row) => (row.reason ? row.reason : <span className="text-gray-400">—</span>),
+  };
+
+  const statusColumn = {
+    key: "status",
+    header: "Status",
+    render: (row) => <Badge tone={statusTone(row.status)}>{row.status}</Badge>,
+  };
+
+  const timeColumn = {
+    key: "appointment_at",
+    header: "Time",
+    render: (row) => {
+      const t = fmtTime(row);
+      return t === "—" ? (
+        <span className="text-gray-400">—</span>
+      ) : (
+        <span className="inline-flex items-center gap-1.5">
+          <Clock className="h-3.5 w-3.5 shrink-0 text-gray-400" aria-hidden="true" />
+          {t}
+        </span>
+      );
+    },
+  };
+
   const columns = isToken
-    ? [
-        { key: "token_number", header: "Token", render: (row) => (row.token_number != null ? `#${row.token_number}` : "—") },
-        { key: "patient_name", header: "Name" },
-        { key: "reason", header: "Reason", render: (row) => row.reason || "—" },
-        { key: "status", header: "Status", render: (row) => <Badge tone={statusTone(row.status)}>{row.status}</Badge> },
-        actionsColumn,
-      ]
+    ? [tokenColumn, nameColumn, reasonColumn, statusColumn, actionsColumn]
     : [
-        { key: "patient_name", header: "Name" },
-        { key: "appointment_at", header: "When", render: (row) => fmtWhen(row) },
+        nameColumn,
+        timeColumn,
         { key: "duration_min", header: "Length", render: (row) => `${row.duration_min || 30}m` },
-        { key: "reason", header: "Reason", render: (row) => row.reason || "—" },
-        { key: "status", header: "Status", render: (row) => <Badge tone={statusTone(row.status)}>{row.status}</Badge> },
+        reasonColumn,
+        statusColumn,
         actionsColumn,
       ];
 
@@ -433,9 +561,28 @@ export default function Appointments() {
               : `${labels.bookings} booked by the AI receptionist and your team. Walk-ins can be added here — the AI won't double-book a taken slot.`}
           </p>
         </div>
-        <Button onClick={openBooking}>
-          <CalendarPlus className="h-4 w-4" /> {isToken ? "Give token" : `Book ${labels.booking.toLowerCase()}`}
-        </Button>
+        {/* Export stays secondary so booking remains the page's primary action. */}
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="secondary"
+            onClick={exportCsv}
+            disabled={exporting || loading}
+            title={
+              filtersActive
+                ? `Export the ${filtered.length} matching ${labels.bookings.toLowerCase()}`
+                : `Export all ${labels.bookings.toLowerCase()}`
+            }
+          >
+            {exporting ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> Exporting...</>
+            ) : (
+              <><Download className="h-4 w-4" /> Export CSV</>
+            )}
+          </Button>
+          <Button onClick={openBooking}>
+            <CalendarPlus className="h-4 w-4" /> {isToken ? "Give token" : `Book ${labels.booking.toLowerCase()}`}
+          </Button>
+        </div>
       </div>
 
       {banner && (
@@ -487,43 +634,93 @@ export default function Appointments() {
       )}
 
       <div className="panel flex flex-col gap-3 rounded-3xl p-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center">
-          <input
-            className="w-full flex-1 rounded-2xl border border-gray-200 px-3.5 py-2 text-sm outline-none focus:border-gray-950"
-            placeholder="Search by name, reason, or status..."
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+          <label className="flex flex-1 items-center gap-2.5 rounded-2xl border border-gray-200 bg-white px-3 py-2">
+            <Search className="h-4 w-4 shrink-0 text-gray-400" />
+            <input
+              className="w-full border-0 bg-transparent p-0 text-sm outline-none placeholder:text-gray-400"
+              placeholder="Search by name, reason, or status..."
+              value={query}
+              onChange={(event) => { setQuery(event.target.value); setPage(1); }}
+              aria-label={`Search ${labels.bookings.toLowerCase()}`}
+            />
+          </label>
+
+          {/* A real from–to range. The single date input this replaces could not express
+              "this week", which is the span people actually ask for. */}
+          <div className="flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2">
+            <CalendarDays className="h-4 w-4 shrink-0 text-gray-400" />
+            <input
+              type="date"
+              className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm outline-none"
+              value={range.from || ""}
+              max={range.to || undefined}
+              onChange={(e) => { setDatePreset("custom"); setCustomFrom(e.target.value); setPage(1); }}
+              aria-label="From date"
+            />
+            <span className="shrink-0 text-gray-300">–</span>
+            <input
+              type="date"
+              className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm outline-none"
+              value={range.to || ""}
+              min={range.from || undefined}
+              onChange={(e) => { setDatePreset("custom"); setCustomTo(e.target.value); setPage(1); }}
+              aria-label="To date"
+            />
+          </div>
+
           <div className="flex items-center gap-2">
-            <label className="flex items-center gap-2 rounded-2xl border border-gray-200 px-3 py-2">
-              <CalendarDays className="h-4 w-4 text-gray-400" />
-              <input
-                type="date"
-                className="border-0 text-sm outline-none"
-                value={dateFilter}
-                onChange={(event) => setDateFilter(event.target.value)}
-                aria-label={`Filter ${labels.bookings.toLowerCase()} by date`}
-              />
-            </label>
-            {dateFilter && (
-              <Button variant="ghost" size="sm" onClick={() => setDateFilter("")}>Clear</Button>
-            )}
+            <Button variant="secondary" onClick={() => setShowFilters((v) => !v)} aria-expanded={showFilters}>
+              <SlidersHorizontal className="h-4 w-4" /> Filters
+              {showFilters ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </Button>
+            <Button variant="secondary" onClick={clearAll} disabled={!filtersActive}>
+              <RotateCcw className="h-4 w-4" /> Clear all
+            </Button>
           </div>
         </div>
 
+        {showFilters && (
+          <div className="grid gap-3 border-t border-gray-100 pt-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2">
+              <span className="block text-[10px] font-semibold uppercase tracking-wider text-gray-400">Status</span>
+              <select
+                className="mt-0.5 w-full border-0 bg-transparent p-0 text-sm text-gray-900 outline-none"
+                value={statusFilter}
+                onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+                aria-label="Filter by status"
+              >
+                <option value="">All status</option>
+                {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            {/* Doctor, type and source filters are deliberately absent: an appointment
+                record carries no such fields, so those controls could only ever be
+                decoration over data that does not exist. */}
+            <p className="text-xs leading-5 text-gray-400 sm:col-span-1 lg:col-span-3">
+              Status is the only stored attribute to filter on — {labels.bookings.toLowerCase()} carry
+              no doctor, type or source field. Use the search box for anything in the name or reason.
+            </p>
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center gap-2">
-          <FilterChip active={!dateFilter} onClick={() => setDateFilter("")}>
-            All dates
-          </FilterChip>
-          <FilterChip active={dateFilter === shiftDays(0)} onClick={() => setDateFilter(shiftDays(0))}>
-            Today
-          </FilterChip>
-          <FilterChip active={dateFilter === shiftDays(1)} onClick={() => setDateFilter(shiftDays(1))}>
-            Tomorrow
-          </FilterChip>
-          {dateFilter && !availableDates.includes(dateFilter) && (
-            <span className="text-xs text-gray-400">
-              Nothing booked on {groupLabel(dateFilter)}.
+          {DATE_PRESETS.map((p) => (
+            <FilterChip
+              key={p.key}
+              active={datePreset === p.key}
+              onClick={() => {
+                setDatePreset(p.key);
+                if (p.key !== "custom") { setCustomFrom(""); setCustomTo(""); }
+                setPage(1);
+              }}
+            >
+              {p.label}
+            </FilterChip>
+          ))}
+          {filtersActive && !loading && (
+            <span className="ml-auto text-xs text-gray-500" aria-live="polite">
+              {filtered.length} of {list.length} {labels.bookings.toLowerCase()} match
             </span>
           )}
         </div>
@@ -535,17 +732,23 @@ export default function Appointments() {
           rows={[]}
           loading={loading}
           emptyTitle={
-            dateFilter
-              ? `No ${labels.bookings.toLowerCase()} on ${groupLabel(dateFilter)}`
+            filtersActive
+              ? `No ${labels.bookings.toLowerCase()} match these filters`
               : `No ${labels.bookings.toLowerCase()} yet`
           }
+          {...(filtersActive
+            ? { emptyDescription: "Try a wider date range, or clear the filters." }
+            : {})}
         />
       ) : (
         <div className="space-y-8">
           {groups.map((group) => (
             <section key={group.key || "undated"} className="space-y-3">
               <div className="flex items-baseline justify-between gap-3">
-                <h2 className="text-lg font-semibold tracking-tight text-gray-950">{group.label}</h2>
+                <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-gray-950">
+                  <CalendarDays className="h-4 w-4 shrink-0 text-gray-400" aria-hidden="true" />
+                  {group.label}
+                </h2>
                 <span className="text-xs font-medium text-gray-500">
                   {group.rows.length} {group.rows.length === 1 ? labels.booking.toLowerCase() : labels.bookings.toLowerCase()}
                 </span>
@@ -555,6 +758,17 @@ export default function Appointments() {
           ))}
         </div>
       )}
+
+      <Pagination
+        page={safePage}
+        pageSize={pageSize}
+        total={filtered.length}
+        onChange={setPage}
+        unit={labels.bookings.toLowerCase()}
+        label={`${labels.bookings} pages`}
+        pageSizeOptions={PAGE_SIZES}
+        onPageSizeChange={(n) => { setPageSize(n); setPage(1); }}
+      />
 
       <Modal
         open={open}
