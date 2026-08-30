@@ -1,14 +1,43 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw, Radio, Search, FileText, Download } from "lucide-react";
+import { RefreshCw, Radio, Search, FileText, Download, Phone, CalendarDays, Headphones } from "lucide-react";
 import api from "../lib/api";
 import CallFilterBar from "../components/CallFilterBar";
+import CallStatsRow from "../components/CallStatsRow";
+import Pagination from "../components/Pagination";
 import { buildCallFilter, EMPTY_FILTERS } from "../lib/callFilters";
+import { deriveCallStats } from "../lib/callStats";
 import DataTable from "../components/DataTable";
 import Modal from "../components/Modal";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 
+const PAGE_SIZE = 10;
+
 const fmtDuration = (s) => `${Math.floor((s || 0) / 60)}m ${(s || 0) % 60}s`;
+
+// "no-answer" -> "No answer". The stored values are lowercase and hyphenated; printing
+// them verbatim in a badge reads like a database dump rather than an outcome.
+const humanizeStatus = (s) => {
+  const t = (s || "unknown").replace(/[-_]+/g, " ").trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+
+const initialOf = (s) => (s || "?").trim().charAt(0).toUpperCase();
+
+// Tint derived from the caller string, so one caller keeps the same colour across rows
+// and refreshes instead of shuffling on every render.
+const AVATAR_TONES = [
+  "bg-blue-50 text-blue-700",
+  "bg-emerald-50 text-emerald-700",
+  "bg-violet-50 text-violet-700",
+  "bg-amber-50 text-amber-700",
+  "bg-rose-50 text-rose-700",
+];
+const avatarTone = (s) => {
+  let h = 0;
+  for (let i = 0; i < (s || "").length; i += 1) h = (h * 31 + s.charCodeAt(i)) % 997;
+  return AVATAR_TONES[h % AVATAR_TONES.length];
+};
 
 const toneFor = (status) => {
   const s = (status || "").toLowerCase();
@@ -40,6 +69,7 @@ export default function Calls() {
   // stays live, as it was before.
   const [draft, setDraft] = useState(EMPTY_FILTERS);
   const [applied, setApplied] = useState(EMPTY_FILTERS);
+  const [page, setPage] = useState(1);
   const [selected, setSelected] = useState(null); // call whose transcript is open
 
   const refresh = useCallback(async () => {
@@ -50,6 +80,7 @@ export default function Calls() {
     ]);
     setLive(liveRes?.data?.success ? liveRes.data.data || [] : []);
     setLogs(logsRes?.data?.success ? (logsRes.data.data || []).map(mapLog) : []);
+    setPage(1);
     setRefreshing(false);
   }, []);
 
@@ -80,9 +111,36 @@ export default function Calls() {
 
   const filtersActive = Object.values(applied).some(Boolean) || !!query.trim();
 
+  // Header figures, computed from the rows already loaded — no extra request, and they
+  // therefore cannot disagree with the table below.
+  const stats = useMemo(() => deriveCallStats(logs, live), [logs, live]);
+
+  // Clamped during render rather than reset from an effect. A narrower result set can be
+  // shorter than the current offset, and the page has to be valid on THIS render — an
+  // effect would paint one empty table first, and setState in an effect body cascades.
+  // Every control that changes the result set also sends the user back to page 1.
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+
+  const paged = useMemo(
+    () => filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [filtered, safePage],
+  );
+
+  const changeQuery = (v) => {
+    setQuery(v);
+    setPage(1);
+  };
+
+  const applyFilters = () => {
+    setApplied(draft);
+    setPage(1);
+  };
+
   const clearFilters = () => {
     setDraft(EMPTY_FILTERS);
     setApplied(EMPTY_FILTERS);
+    setPage(1);
   };
 
   const downloadCall = (row) => {
@@ -102,11 +160,49 @@ export default function Calls() {
   };
 
   const columns = [
-    { key: "caller", header: "Caller" },
-    { key: "phone", header: "Phone", render: (row) => row.phone || "—" },
+    {
+      key: "caller",
+      header: "Caller",
+      render: (row) => (
+        <div className="flex items-center gap-2.5">
+          <span
+            className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-xs font-semibold ${avatarTone(row.caller)}`}
+            aria-hidden="true"
+          >
+            {initialOf(row.caller)}
+          </span>
+          <span className="font-medium text-gray-950">{row.caller}</span>
+        </div>
+      ),
+    },
+    {
+      key: "phone",
+      header: "Phone",
+      render: (row) =>
+        row.phone ? (
+          <span className="inline-flex items-center gap-1.5">
+            <Phone className="h-3.5 w-3.5 shrink-0 text-gray-400" aria-hidden="true" />
+            {row.phone}
+          </span>
+        ) : (
+          "—"
+        ),
+    },
     { key: "duration", header: "Duration", render: (row) => fmtDuration(row.durationSec) },
-    { key: "status", header: "Outcome", render: (row) => <Badge tone={toneFor(row.status)}>{row.status}</Badge> },
-    { key: "date", header: "When", render: (row) => (row.date ? new Date(row.date).toLocaleString() : "—") },
+    { key: "status", header: "Outcome", render: (row) => <Badge tone={toneFor(row.status)}>{humanizeStatus(row.status)}</Badge> },
+    {
+      key: "date",
+      header: "When",
+      render: (row) =>
+        row.date ? (
+          <span className="inline-flex items-center gap-1.5">
+            <CalendarDays className="h-3.5 w-3.5 shrink-0 text-gray-400" aria-hidden="true" />
+            {new Date(row.date).toLocaleString()}
+          </span>
+        ) : (
+          "—"
+        ),
+    },
     {
       key: "actions",
       header: "Actions",
@@ -135,6 +231,8 @@ export default function Calls() {
         </Button>
       </div>
 
+      <CallStatsRow stats={stats} loading={loading} />
+
       {/* Live calls */}
       <section className="space-y-3">
         <div className="flex items-center gap-2">
@@ -144,7 +242,26 @@ export default function Calls() {
           <h2 className="text-lg font-semibold text-gray-950">Happening now</h2>
         </div>
         {live.length === 0 ? (
-          <div className="panel rounded-3xl p-6 text-sm text-gray-400">{loading ? "Checking for live calls…" : "No live calls right now."}</div>
+          <div className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-emerald-50/60 p-6">
+            <div className="relative flex items-start gap-3">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-emerald-100 text-emerald-700">
+                <Radio className="h-4 w-4" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-gray-950">
+                  {loading ? "Checking for live calls…" : "No live calls right now"}
+                </p>
+                <p className="mt-0.5 text-sm text-emerald-900/60">
+                  You'll see active calls here as they happen.
+                </p>
+              </div>
+            </div>
+            {/* Decorative, and hidden on phones where it would sit under the text. */}
+            <Headphones
+              className="pointer-events-none absolute -bottom-4 right-5 hidden h-24 w-24 text-emerald-600/15 sm:block"
+              aria-hidden="true"
+            />
+          </div>
         ) : (
           <div className="grid gap-4 xl:grid-cols-3">
             {live.map((call) => (
@@ -172,7 +289,7 @@ export default function Calls() {
       <CallFilterBar
         value={draft}
         onChange={setDraft}
-        onApply={() => setApplied(draft)}
+        onApply={applyFilters}
         onClear={clearFilters}
         statusOptions={statusOptions}
         disabled={loading}
@@ -180,31 +297,44 @@ export default function Calls() {
 
       {/* Call history */}
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-gray-950">Call history</h2>
-        <div className="panel flex flex-col gap-3 rounded-3xl p-4 md:flex-row">
-          <label className="flex flex-1 items-center gap-3 rounded-2xl border border-gray-200 px-3 py-2">
-            <Search className="h-4 w-4 text-gray-400" />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-950">Call history</h2>
+            <p className="mt-0.5 text-sm text-gray-500">
+              Browse and review all calls handled by your AI receptionist.
+            </p>
+            {/* Without this, a filter that matches few rows is indistinguishable from a
+                tenant who has barely taken any calls. */}
+            {filtersActive && !loading && (
+              <p className="mt-1 text-xs text-gray-500" aria-live="polite">
+                {filtered.length} of {logs.length} calls match
+              </p>
+            )}
+          </div>
+          <label className="flex items-center gap-2.5 rounded-2xl border border-gray-200 bg-white px-3 py-2 sm:w-80">
+            <Search className="h-4 w-4 shrink-0 text-gray-400" />
             <input
-              className="w-full border-0 outline-none"
+              className="w-full border-0 bg-transparent p-0 text-sm outline-none placeholder:text-gray-400"
               placeholder="Search by caller, phone, or outcome..."
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => changeQuery(e.target.value)}
+              aria-label="Search calls"
             />
           </label>
         </div>
-        {/* Without this, a filter that matches nothing is indistinguishable from a
-            tenant who has taken no calls. */}
-        {filtersActive && !loading && (
-          <p className="text-xs text-gray-500" aria-live="polite">
-            Showing {filtered.length} of {logs.length} calls
-          </p>
-        )}
         <DataTable
           columns={columns}
-          rows={filtered}
+          rows={paged}
           loading={loading}
           emptyTitle={filtersActive ? "No calls match these filters" : "No calls yet"}
           {...(filtersActive ? { emptyDescription: "Try widening the date range or clearing a filter." } : {})}
+        />
+        <Pagination
+          page={safePage}
+          pageSize={PAGE_SIZE}
+          total={filtered.length}
+          onChange={setPage}
+          unit="calls"
         />
       </section>
 

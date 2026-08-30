@@ -39,33 +39,39 @@ export default function CallFilterBar({ value, onChange, onApply, onClear, statu
       onSubmit={(e) => { e.preventDefault(); onApply(); }}
       aria-label="Filter call history"
     >
-      <div className="grid flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        <Group label="Date range" icon={Calendar}>
-          {/* Two native date inputs rather than a custom range picker: no new
-              dependency, a real keyboard-accessible calendar, and the platform picker
-              on mobile. */}
-          <div className="flex items-center gap-1">
-            <input
-              type="date"
-              className={FIELD}
-              value={value.from}
-              max={value.to || undefined}
-              onChange={(e) => set({ from: e.target.value })}
-              disabled={disabled}
-              aria-label="From date"
-            />
-            <span className="text-gray-300">–</span>
-            <input
-              type="date"
-              className={FIELD}
-              value={value.to}
-              min={value.from || undefined}
-              onChange={(e) => set({ to: e.target.value })}
-              disabled={disabled}
-              aria-label="To date"
-            />
-          </div>
-        </Group>
+      {/* 6 columns so the date range can take two of them and the remaining four
+          controls each take one, all on a single row at xl. */}
+      <div className="grid flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        {/* Widest control: two dates plus a separator never fit the same column as a
+            single select, which is what squeezed them into "dd-mm-yyyy – d". */}
+        <div className="sm:col-span-2 lg:col-span-2 xl:col-span-2">
+          <Group label="Date range" icon={Calendar}>
+            {/* Two native date inputs rather than a custom range picker: no new
+                dependency, a real keyboard-accessible calendar, and the platform picker
+                on mobile. */}
+            <div className="flex items-center gap-1.5">
+              <input
+                type="date"
+                className={`${FIELD} min-w-0 flex-1`}
+                value={value.from}
+                max={value.to || undefined}
+                onChange={(e) => set({ from: e.target.value })}
+                disabled={disabled}
+                aria-label="From date"
+              />
+              <span className="shrink-0 text-gray-300">–</span>
+              <input
+                type="date"
+                className={`${FIELD} min-w-0 flex-1`}
+                value={value.to}
+                min={value.from || undefined}
+                onChange={(e) => set({ to: e.target.value })}
+                disabled={disabled}
+                aria-label="To date"
+              />
+            </div>
+          </Group>
+        </div>
 
         <Group label="Status">
           <select

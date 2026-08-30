@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   Bot,
   CalendarCheck,
+  ChevronRight,
   CreditCard,
   Gauge,
   Headphones,
@@ -154,6 +155,16 @@ export default function Sidebar({ open, onClose }) {
                   ? `${activeNumbers} active — calls are answered by your AI receptionist.`
                   : "All numbers are inactive. Activate one in Agent Setup to receive calls."}
               </p>
+              {/* The no-number branch below already offered a way forward; once a number
+                  was connected this card became a dead end. */}
+              <NavLink
+                to="/setup"
+                onClick={onClose}
+                className="mt-3 flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-900 transition hover:bg-gray-50"
+              >
+                Manage numbers
+                <ChevronRight className="h-3.5 w-3.5 text-gray-400" />
+              </NavLink>
             </>
           ) : (
             <>
