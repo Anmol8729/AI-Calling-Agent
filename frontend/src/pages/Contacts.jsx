@@ -1,5 +1,6 @@
 import {
-  ArrowDownRight, ArrowUpRight, Phone, PhoneMissed, RotateCcw, Search, Trash2, UserPlus, Users,
+  ArrowDownRight, ArrowUpRight, Download, Loader2, Phone, PhoneMissed, RotateCcw, Search,
+  Trash2, UserPlus, Users,
 } from "lucide-react";
 import { useMemo, useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
@@ -13,11 +14,26 @@ import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import MiniStat from "../components/ui/MiniStat";
 import { avatarTone, initialOf } from "../lib/avatar";
+import { dateStamp, downloadCsv, toCsv } from "../lib/csv";
 import { derivePatientStats } from "../lib/patientStats";
 import { useAuthStore } from "../store/authStore";
 
 const emptyForm = { name: "", phone: "", email: "", age: "", gender: "", notes: "" };
 const PAGE_SIZES = [10, 25, 50];
+
+// Exactly the columns the table shows. Deliberately no id, clinic_id or created_by —
+// those are internal keys, of no use in a spreadsheet and not ours to hand out.
+const CSV_COLUMNS = [
+  { header: "Name", value: (r) => r.name },
+  // Written as the plain number. Prefixing with = or a tab would make Excel show it as
+  // text, but it would also corrupt the field for every other reader.
+  { header: "Phone", value: (r) => r.phone },
+  { header: "Email", value: (r) => (r.email === "N/A" ? "" : r.email) },
+  { header: "Details", value: (r) => r.company },
+  { header: "Notes", value: (r) => (r.lastContacted === "None" ? "" : r.lastContacted) },
+  { header: "Source", value: (r) => (r.source === "manual" ? "Manual" : "Agent") },
+  { header: "Status", value: (r) => r.status },
+];
 
 function extractError(err) {
   const d = err?.response?.data;
@@ -78,6 +94,7 @@ export default function Contacts() {
   const [formError, setFormError] = useState("");
 
   const [banner, setBanner] = useState(null); // { type: "success" | "error", text }
+  const [exporting, setExporting] = useState(false);
 
   // Deleting a contact is permanent, so it goes through a confirm step that names
   // the record. `confirmRow` doubles as the modal's open flag.
@@ -145,6 +162,32 @@ export default function Contacts() {
     () => filtered.slice((safePage - 1) * pageSize, safePage * pageSize),
     [filtered, safePage, pageSize],
   );
+
+  // Exports `filtered`, not `paged`: the filtered set is every matching record across
+  // all pages, so the file follows the search and filters while ignoring which page
+  // happens to be open. With no filters set, that is the whole list.
+  const exportCsv = () => {
+    setBanner(null);
+    if (filtered.length === 0) {
+      setBanner({ type: "error", text: `No ${labels.contacts.toLowerCase()} found to export.` });
+      return;
+    }
+    setExporting(true);
+    try {
+      const slug = labels.contacts.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      downloadCsv(`clarivo-${slug}-${dateStamp()}.csv`, toCsv(CSV_COLUMNS, filtered));
+      setBanner({
+        type: "success",
+        text: `Exported ${filtered.length} ${labels.contacts.toLowerCase()}${
+          filtersActive ? " matching the current filters" : ""
+        }.`,
+      });
+    } catch {
+      setBanner({ type: "error", text: `Unable to export ${labels.contacts.toLowerCase()}. Please try again.` });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const filtersActive = !!(query.trim() || sourceFilter || statusFilter);
   const clearFilters = () => {
@@ -288,9 +331,29 @@ export default function Contacts() {
           <h1 className="text-3xl font-semibold tracking-tight text-gray-950">{labels.contacts}</h1>
           <p className="mt-2 text-sm text-gray-500">Add and manage {labels.contact.toLowerCase()} records the AI receptionist uses to recognise inbound callers.</p>
         </div>
-        <Button onClick={() => { setFormError(""); setForm(emptyForm); setOpen(true); }}>
-          <UserPlus className="h-4 w-4" /> Add {labels.contact.toLowerCase()}
-        </Button>
+        {/* Export stays secondary so Add remains the page's primary action. Wraps rather
+            than shrinking on a narrow screen. */}
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="secondary"
+            onClick={exportCsv}
+            disabled={exporting || loading}
+            title={
+              filtersActive
+                ? `Export the ${filtered.length} matching ${labels.contacts.toLowerCase()}`
+                : `Export all ${labels.contacts.toLowerCase()}`
+            }
+          >
+            {exporting ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> Exporting...</>
+            ) : (
+              <><Download className="h-4 w-4" /> Export CSV</>
+            )}
+          </Button>
+          <Button onClick={() => { setFormError(""); setForm(emptyForm); setOpen(true); }}>
+            <UserPlus className="h-4 w-4" /> Add {labels.contact.toLowerCase()}
+          </Button>
+        </div>
       </div>
 
       {/* All four figures are derived from the list already loaded — no extra request. */}
