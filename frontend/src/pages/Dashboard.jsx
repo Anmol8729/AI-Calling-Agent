@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Activity, CalendarCheck, CheckCircle2, Circle, PhoneCall, Target, Timer, TrendingUp, Users } from "lucide-react";
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Activity, CalendarCheck, CheckCircle2, Circle, PhoneCall, Timer, Users } from "lucide-react";
 import api from "../lib/api";
 import { useLabels } from "../store/clinicStore";
 import ChartCard from "../components/ChartCard";
@@ -9,10 +9,6 @@ import CurrentPlanCard from "../components/CurrentPlanCard";
 import DataTable from "../components/DataTable";
 import StatCard from "../components/StatCard";
 import { Badge } from "../components/ui/Badge";
-
-const COLORS = ["#111827", "#6b7280", "#d1d5db", "#f59e0b", "#10b981", "#ef4444"];
-const STAGE_COLORS = ["bg-gray-950", "bg-gray-600", "bg-emerald-500"];
-const nf = new Intl.NumberFormat("en-IN");
 
 const fmtDuration = (s) => `${Math.floor((s || 0) / 60)}m ${(s || 0) % 60}s`;
 const dayLabel = (iso) => {
@@ -33,14 +29,14 @@ const toneFor = (status) => {
 export default function Dashboard() {
   const labels = useLabels();
   const [data, setData] = useState(null);
-  const [funnel, setFunnel] = useState(null);
   const [onboarding, setOnboarding] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // /stats/funnel is no longer requested: the conversion funnel it fed was removed,
+  // and nothing else on this page reads it.
   useEffect(() => {
     Promise.all([
       api.get("/stats/overview").then((res) => { if (res.data?.success) setData(res.data.data); }).catch(() => {}),
-      api.get("/stats/funnel").then((res) => { if (res.data?.success) setFunnel(res.data.data); }).catch(() => {}),
       api.get("/stats/onboarding").then((res) => { if (res.data?.success) setOnboarding(res.data.data); }).catch(() => {}),
     ]).finally(() => setLoading(false));
   }, []);
@@ -59,16 +55,7 @@ export default function Dashboard() {
   const totals = data?.totals || {};
   const calls = data?.calls || {};
   const daily = (data?.daily || []).map((d) => ({ ...d, label: dayLabel(d.date) }));
-  const outcomes = data?.outcomes || [];
   const recent = data?.recent || [];
-
-  const f = funnel || {};
-  const stages = [
-    { label: "Calls received", value: f.calls ?? 0 },
-    { label: "Answered", value: f.answered ?? 0 },
-    { label: `${labels.bookings} booked`, value: f.appointments ?? 0 },
-  ];
-  const maxStage = Math.max(f.calls ?? 0, 1);
 
   const columns = [
     { key: "customer", header: "Caller" },
@@ -129,88 +116,19 @@ export default function Dashboard() {
         <StatCard title="Avg duration" value={fmtDuration(calls.avgDurationSec)} icon={Timer} tone="light" loading={loading} />
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-3">
-        <ChartCard title="Daily inbound calls" description="Calls received over the last 7 days">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={daily}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} />
-              <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
-              <Tooltip />
-              <Line type="monotone" dataKey="count" stroke="#111827" strokeWidth={3} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </ChartCard>
-
-        <ChartCard title="Call outcomes" description="Distribution by status">
-          {outcomes.length === 0 ? (
-            <div className="grid h-full place-items-center px-6 text-center text-sm text-gray-400">
-              This fills in once your assistant starts taking calls.
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={outcomes} dataKey="count" nameKey="status" innerRadius={62} outerRadius={98} paddingAngle={4}>
-                  {outcomes.map((entry, index) => (
-                    <Cell key={entry.status} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </ChartCard>
-
-        <ChartCard title="Calls this week" description="Total received in the last 7 days">
-          <div className="grid h-full place-items-center">
-            <div className="text-center">
-              {loading ? (
-                <div className="mx-auto h-14 w-24 animate-pulse rounded-xl bg-gray-200/80" aria-hidden="true" />
-              ) : (
-                <p className="text-6xl font-semibold tracking-tight text-gray-950">{calls.last7Days ?? 0}</p>
-              )}
-              <p className="mt-2 text-sm text-gray-500">{calls.active ?? 0} active right now</p>
-            </div>
-          </div>
-        </ChartCard>
-      </section>
-
-      {/* Conversion funnel (last 30 days) */}
-      <section className="space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-950">Conversion funnel</h2>
-          <p className="text-sm text-gray-500">Last {f.periodDays ?? 30} days</p>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <StatCard title="Answer rate" value={`${f.answerRate ?? 0}%`} icon={Target} tone="light" loading={loading} />
-          <StatCard title="Booking conversion" value={`${f.conversionRate ?? 0}%`} icon={TrendingUp} tone="light" loading={loading} />
-          <StatCard title="Calls answered" value={nf.format(f.answered ?? 0)} icon={PhoneCall} tone="light" loading={loading} />
-        </div>
-        <div className="panel rounded-3xl p-6">
-          {(f.calls ?? 0) === 0 ? (
-            <div className="grid place-items-center py-8 text-center text-sm text-gray-400">
-              No calls in the last {f.periodDays ?? 30} days yet — your funnel appears here after the first call.
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {stages.map((s, i) => (
-                <div key={s.label}>
-                  <div className="mb-1 flex items-center justify-between text-sm">
-                    <span className="text-gray-600">{s.label}</span>
-                    <span className="font-semibold text-gray-950">{nf.format(s.value)}</span>
-                  </div>
-                  <div className="h-3 w-full overflow-hidden rounded-full bg-gray-100">
-                    <div className={`h-full rounded-full ${STAGE_COLORS[i]}`} style={{ width: `${Math.max((s.value / maxStage) * 100, s.value > 0 ? 4 : 0)}%` }} />
-                  </div>
-                </div>
-              ))}
-              <p className="pt-1 text-xs text-gray-400">
-                {nf.format(f.leads ?? 0)} {labels.contacts.toLowerCase()} captured
-              </p>
-            </div>
-          )}
-        </div>
-      </section>
+      {/* One chart, so full width rather than a third of a three-column grid with two
+          empty cells. The trend reads better with the extra room anyway. */}
+      <ChartCard title="Daily inbound calls" description="Calls received over the last 7 days">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={daily}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
+            <XAxis dataKey="label" tickLine={false} axisLine={false} />
+            <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
+            <Tooltip />
+            <Line type="monotone" dataKey="count" stroke="#111827" strokeWidth={3} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </ChartCard>
 
       <section className="space-y-4">
         <h2 className="text-lg font-semibold text-gray-950">Recent calls</h2>
