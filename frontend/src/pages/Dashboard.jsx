@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Activity, CalendarCheck, CheckCircle2, Circle, PhoneCall, Timer, Users } from "lucide-react";
+import { Activity, CalendarCheck, CheckCircle2, Circle, PhoneCall, Users } from "lucide-react";
 import api from "../lib/api";
 import { useLabels } from "../store/clinicStore";
 import ChartCard from "../components/ChartCard";
@@ -106,14 +106,13 @@ export default function Dashboard() {
         </section>
       )}
 
-      {/* 5 cards: 2-up on small, 3-up on md (so the last row holds 2, not 1),
-          then 5-up on xl. Avoids a single orphaned card at tablet widths. */}
-      <section className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
+      {/* 4 cards: 2-up until xl, then 4-up. Deliberately no 3-column step — that
+          would leave the fourth card alone on its own row at tablet widths. */}
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard title="Total calls" value={totals.calls ?? 0} icon={PhoneCall} loading={loading} />
         <StatCard title="Calls today" value={calls.today ?? 0} icon={Activity} tone="light" loading={loading} />
         <StatCard title={labels.bookings} value={totals.appointments ?? 0} icon={CalendarCheck} tone="light" loading={loading} />
         <StatCard title={labels.contacts} value={totals.contacts ?? 0} icon={Users} tone="light" loading={loading} />
-        <StatCard title="Avg duration" value={fmtDuration(calls.avgDurationSec)} icon={Timer} tone="light" loading={loading} />
       </section>
 
       {/* One chart, so full width rather than a third of a three-column grid with two
