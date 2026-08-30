@@ -6,6 +6,7 @@ import CallStatsRow from "../components/CallStatsRow";
 import Pagination from "../components/Pagination";
 import { buildCallFilter, EMPTY_FILTERS } from "../lib/callFilters";
 import { deriveCallStats } from "../lib/callStats";
+import { avatarTone, initialOf } from "../lib/avatar";
 import DataTable from "../components/DataTable";
 import Modal from "../components/Modal";
 import { Badge } from "../components/ui/Badge";
@@ -22,22 +23,7 @@ const humanizeStatus = (s) => {
   return t.charAt(0).toUpperCase() + t.slice(1);
 };
 
-const initialOf = (s) => (s || "?").trim().charAt(0).toUpperCase();
 
-// Tint derived from the caller string, so one caller keeps the same colour across rows
-// and refreshes instead of shuffling on every render.
-const AVATAR_TONES = [
-  "bg-blue-50 text-blue-700",
-  "bg-emerald-50 text-emerald-700",
-  "bg-violet-50 text-violet-700",
-  "bg-amber-50 text-amber-700",
-  "bg-rose-50 text-rose-700",
-];
-const avatarTone = (s) => {
-  let h = 0;
-  for (let i = 0; i < (s || "").length; i += 1) h = (h * 31 + s.charCodeAt(i)) % 997;
-  return AVATAR_TONES[h % AVATAR_TONES.length];
-};
 
 const toneFor = (status) => {
   const s = (status || "").toLowerCase();

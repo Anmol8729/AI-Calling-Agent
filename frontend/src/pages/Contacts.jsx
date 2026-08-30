@@ -1,4 +1,6 @@
-import { Search, Trash2, UserPlus } from "lucide-react";
+import {
+  ArrowDownRight, ArrowUpRight, Phone, PhoneMissed, RotateCcw, Search, Trash2, UserPlus, Users,
+} from "lucide-react";
 import { useMemo, useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../lib/api";
@@ -6,11 +8,16 @@ import { useLabels } from "../store/clinicStore";
 
 import DataTable from "../components/DataTable";
 import Modal from "../components/Modal";
+import Pagination from "../components/Pagination";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
+import MiniStat from "../components/ui/MiniStat";
+import { avatarTone, initialOf } from "../lib/avatar";
+import { derivePatientStats } from "../lib/patientStats";
 import { useAuthStore } from "../store/authStore";
 
 const emptyForm = { name: "", phone: "", email: "", age: "", gender: "", notes: "" };
+const PAGE_SIZES = [10, 25, 50];
 
 function extractError(err) {
   const d = err?.response?.data;
@@ -29,6 +36,11 @@ function extractError(err) {
 }
 
 function formatPatient(p) {
+  // `history` is filled in by the agent when it deals with this caller, so a non-empty
+  // history means the receptionist has recognised them on a call. Both the Status column
+  // and the recognised/not-recognised statistics read this one field, which is why they
+  // can never disagree.
+  const recognised = !!(p.history && p.history.length > 0);
   return {
     id: p.id,
     name: p.name,
@@ -36,8 +48,10 @@ function formatPatient(p) {
     email: p.email || "N/A",
     company: p.gender ? `${p.gender}, Age ${p.age || "N/A"}` : "Contact",
     lastContacted: p.follow_up_notes || "None",
-    status: p.history && p.history.length > 0 ? "Returning" : "New",
+    status: recognised ? "Returning" : "New",
     source: p.source || "agent",
+    recognised,
+    createdAt: p.created_at || null,
   };
 }
 
@@ -51,6 +65,10 @@ export default function Contacts() {
   const isStaff = user?.role === "staff";
   const [list, setList] = useState([]);
   const [query, setQuery] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
   const [loading, setLoading] = useState(true);
   const [live, setLive] = useState(false);
 
@@ -89,13 +107,52 @@ export default function Contacts() {
     loadContacts();
   }, [loadContacts]);
 
-  const filtered = useMemo(
-    () =>
-      list.filter((contact) =>
-        `${contact.name} ${contact.company} ${contact.email}`.toLowerCase().includes(query.toLowerCase()),
-      ),
-    [query, list],
+  // Header figures, from the list already fetched — no extra request, so they cannot
+  // disagree with the table below.
+  const stats = useMemo(() => derivePatientStats(list), [list]);
+
+  // Offered values come from the data, so a filter can never advertise a source or
+  // status that no row has and then return an empty table with no explanation.
+  const sourceOptions = useMemo(
+    () => [...new Set(list.map((c) => c.source).filter(Boolean))].sort(),
+    [list],
   );
+  const statusOptions = useMemo(
+    () => [...new Set(list.map((c) => c.status).filter(Boolean))].sort(),
+    [list],
+  );
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    // Phone digits compared separately so "79871 01876" finds "917987101876".
+    const qDigits = query.replace(/\D/g, "");
+    return list.filter((contact) => {
+      if (sourceFilter && contact.source !== sourceFilter) return false;
+      if (statusFilter && contact.status !== statusFilter) return false;
+      if (!q) return true;
+      // Phone was NOT searchable before — the placeholder offered it, the filter did not.
+      const haystack = `${contact.name} ${contact.company} ${contact.email}`.toLowerCase();
+      if (haystack.includes(q)) return true;
+      return !!qDigits && (contact.phone || "").replace(/\D/g, "").includes(qDigits);
+    });
+  }, [query, list, sourceFilter, statusFilter]);
+
+  // Clamped during render rather than reset from an effect: a narrower result set can be
+  // shorter than the current offset and the page must be valid on this same render.
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const paged = useMemo(
+    () => filtered.slice((safePage - 1) * pageSize, safePage * pageSize),
+    [filtered, safePage, pageSize],
+  );
+
+  const filtersActive = !!(query.trim() || sourceFilter || statusFilter);
+  const clearFilters = () => {
+    setQuery("");
+    setSourceFilter("");
+    setStatusFilter("");
+    setPage(1);
+  };
 
   const updateField = (key) => (event) => setForm((prev) => ({ ...prev, [key]: event.target.value }));
 
@@ -156,11 +213,37 @@ export default function Contacts() {
   };
 
   const columns = [
-    { key: "name", header: "Name" },
-    { key: "phone", header: "Phone" },
-    { key: "email", header: "Email" },
+    {
+      key: "name",
+      header: "Name",
+      render: (row) => (
+        <div className="flex items-center gap-2.5">
+          <span
+            className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-xs font-semibold ${avatarTone(row.name)}`}
+            aria-hidden="true"
+          >
+            {initialOf(row.name)}
+          </span>
+          <span className="font-medium text-gray-950">{row.name}</span>
+        </div>
+      ),
+    },
+    {
+      key: "phone",
+      header: "Phone",
+      render: (row) =>
+        row.phone ? (
+          <span className="inline-flex items-center gap-1.5">
+            <Phone className="h-3.5 w-3.5 shrink-0 text-gray-400" aria-hidden="true" />
+            {row.phone}
+          </span>
+        ) : (
+          "N/A"
+        ),
+    },
+    { key: "email", header: "Email", render: (row) => <span className={row.email === "N/A" ? "text-gray-400" : ""}>{row.email}</span> },
     { key: "company", header: "Details" },
-    { key: "lastContacted", header: "Notes" },
+    { key: "lastContacted", header: "Notes", render: (row) => <span className={row.lastContacted === "None" ? "text-gray-400" : ""}>{row.lastContacted}</span> },
     {
       key: "source",
       header: "Source",
@@ -173,18 +256,25 @@ export default function Contacts() {
     {
       key: "status",
       header: "Status",
-      render: (row) => <Badge tone={row.status === "Returning" ? "success" : "neutral"}>{row.status}</Badge>,
+      // "New" is informational, not a warning: the agent simply has not met them yet.
+      render: (row) => <Badge tone={row.status === "Returning" ? "success" : "info"}>{row.status}</Badge>,
     },
     {
       key: "actions",
-      header: "",
+      header: "Actions",
       render: (row) => (
-        <div className="flex justify-end gap-2">
+        <div className="flex items-center justify-end gap-2">
           <Button variant="secondary" size="sm" onClick={() => navigate(`/contacts/${row.id}`)}>View</Button>
           {!isStaff && (
-            <Button variant="danger" size="sm" onClick={() => setConfirmRow(row)}>
-              <Trash2 className="h-3.5 w-3.5" /> Delete
-            </Button>
+            <button
+              type="button"
+              onClick={() => setConfirmRow(row)}
+              title={`Delete ${row.name}`}
+              aria-label={`Delete ${row.name}`}
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-gray-200 text-gray-400 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
           )}
         </div>
       ),
@@ -202,6 +292,58 @@ export default function Contacts() {
           <UserPlus className="h-4 w-4" /> Add {labels.contact.toLowerCase()}
         </Button>
       </div>
+
+      {/* All four figures are derived from the list already loaded — no extra request. */}
+      <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <MiniStat
+          icon={Users}
+          tone="violet"
+          label={`Total ${labels.contacts.toLowerCase()}`}
+          value={stats.total}
+          sub="All time"
+          loading={loading}
+        />
+        <MiniStat
+          icon={Phone}
+          tone="emerald"
+          label="Recognised callers"
+          value={stats.recognised}
+          sub={stats.total > 0 ? `${stats.recognisedShare}% of total` : "None yet"}
+          loading={loading}
+        />
+        <MiniStat
+          icon={UserPlus}
+          tone="amber"
+          label="New this month"
+          value={stats.newThisMonth}
+          // Omitted when nothing was added last month: a percentage against zero is
+          // undefined, and any figure here would be invented.
+          sub={
+            typeof stats.newChangePct === "number" ? (
+              <span className="inline-flex items-center gap-1">
+                {stats.newChangePct >= 0
+                  ? <ArrowUpRight className="h-3 w-3" />
+                  : <ArrowDownRight className="h-3 w-3" />}
+                {Math.abs(stats.newChangePct)}% vs last month
+              </span>
+            ) : null
+          }
+          subTone={
+            typeof stats.newChangePct === "number"
+              ? (stats.newChangePct >= 0 ? "text-emerald-600" : "text-red-600")
+              : undefined
+          }
+          loading={loading}
+        />
+        <MiniStat
+          icon={PhoneMissed}
+          tone="red"
+          label="Not recognised yet"
+          value={stats.notRecognised}
+          sub={stats.total > 0 ? `${stats.notRecognisedShare}% of total` : "None yet"}
+          loading={loading}
+        />
+      </section>
       {banner && (
         <div
           className={`flex items-start justify-between gap-3 rounded-2xl border p-4 text-sm ${
@@ -221,19 +363,84 @@ export default function Contacts() {
         <p className="text-xs text-gray-400">Couldn't reach the backend. Sign in and ensure the API is running to see and manage {labels.contacts.toLowerCase()}.</p>
       )}
 
-      <div className="panel flex flex-col gap-3 rounded-3xl p-4 md:flex-row">
-        <label className="flex flex-1 items-center gap-3 rounded-2xl border border-gray-200 px-3 py-2">
-          <Search className="h-4 w-4 text-gray-400" />
+      <div className="panel grid gap-3 rounded-3xl p-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_11rem_11rem_auto] xl:items-end">
+        <label className="flex items-center gap-2.5 rounded-2xl border border-gray-200 bg-white px-3 py-2">
+          <Search className="h-4 w-4 shrink-0 text-gray-400" />
           <input
-            className="w-full border-0 outline-none"
-            placeholder={`Search ${labels.contacts.toLowerCase()}...`}
+            className="w-full border-0 bg-transparent p-0 text-sm outline-none placeholder:text-gray-400"
+            placeholder={`Search ${labels.contacts.toLowerCase()} by name, phone, or email...`}
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setPage(1);
+            }}
+            aria-label={`Search ${labels.contacts.toLowerCase()}`}
           />
         </label>
+
+        <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2">
+          <span className="block text-[10px] font-semibold uppercase tracking-wider text-gray-400">Source</span>
+          <select
+            className="mt-0.5 w-full border-0 bg-transparent p-0 text-sm text-gray-900 outline-none"
+            value={sourceFilter}
+            onChange={(e) => { setSourceFilter(e.target.value); setPage(1); }}
+            aria-label="Filter by source"
+          >
+            <option value="">All sources</option>
+            {sourceOptions.map((s) => (
+              <option key={s} value={s}>{s === "manual" ? "Manual" : "Agent"}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2">
+          <span className="block text-[10px] font-semibold uppercase tracking-wider text-gray-400">Status</span>
+          <select
+            className="mt-0.5 w-full border-0 bg-transparent p-0 text-sm text-gray-900 outline-none"
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+            aria-label="Filter by status"
+          >
+            <option value="">All status</option>
+            {statusOptions.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
+
+        <Button variant="secondary" onClick={clearFilters} disabled={!filtersActive} className="sm:col-span-2 xl:col-span-1">
+          <RotateCcw className="h-4 w-4" /> Clear filters
+        </Button>
       </div>
 
-      <DataTable columns={columns} rows={filtered} loading={loading} emptyTitle={`No ${labels.contacts.toLowerCase()} yet, add your first one`} />
+      {filtersActive && !loading && (
+        <p className="-mt-2 text-xs text-gray-500" aria-live="polite">
+          {filtered.length} of {list.length} {labels.contacts.toLowerCase()} match
+        </p>
+      )}
+
+      <DataTable
+        columns={columns}
+        rows={paged}
+        loading={loading}
+        emptyTitle={
+          filtersActive
+            ? `No ${labels.contacts.toLowerCase()} match these filters`
+            : `No ${labels.contacts.toLowerCase()} yet, add your first one`
+        }
+        {...(filtersActive ? { emptyDescription: "Try a different search, or clear the filters." } : {})}
+      />
+
+      <Pagination
+        page={safePage}
+        pageSize={pageSize}
+        total={filtered.length}
+        onChange={setPage}
+        unit={labels.contacts.toLowerCase()}
+        label={`${labels.contacts} pages`}
+        pageSizeOptions={PAGE_SIZES}
+        onPageSizeChange={(n) => { setPageSize(n); setPage(1); }}
+      />
 
       <Modal
         open={open}
