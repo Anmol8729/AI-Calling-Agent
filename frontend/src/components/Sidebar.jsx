@@ -98,7 +98,7 @@ export default function Sidebar({ open, onClose }) {
       >
         <div className="flex items-center justify-between px-2">
           <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-2xl bg-gray-950 text-white shadow-lg shadow-gray-950/20">
+            <div className="grid h-10 w-10 place-items-center rounded-2xl bg-brand-500 text-white shadow-lg shadow-gray-950/20">
               <Bot className="h-5 w-5" />
             </div>
             <div>
@@ -120,7 +120,7 @@ export default function Sidebar({ open, onClose }) {
               className={({ isActive }) =>
                 `flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition ${
                   isActive
-                    ? "bg-gray-950 text-white shadow-lg shadow-gray-950/15"
+                    ? "bg-brand-500 text-white shadow-lg shadow-gray-950/15"
                     : "text-gray-600 hover:bg-gray-100 hover:text-gray-950"
                 }`
               }

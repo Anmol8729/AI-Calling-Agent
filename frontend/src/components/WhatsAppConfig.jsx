@@ -233,7 +233,7 @@ export default function WhatsAppConfig({ settings, disabled = false, onSaved }) 
               aria-pressed={showToken}
               aria-controls="wa-token"
               disabled={disabled || busy}
-              className="absolute right-1 top-1 grid h-[calc(100%-0.5rem)] w-9 place-items-center rounded-lg text-gray-400 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-950 disabled:cursor-not-allowed"
+              className="absolute right-1 top-1 grid h-[calc(100%-0.5rem)] w-9 place-items-center rounded-lg text-gray-400 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed"
             >
               {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>

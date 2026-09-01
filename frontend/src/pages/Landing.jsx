@@ -136,7 +136,7 @@ function TapToCallCard({ phone }) {
       {phone && (
         <a
           href={`tel:${phone}`}
-          className="inline-flex items-center gap-2 rounded-2xl bg-gray-950 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-gray-950/20 hover:bg-gray-800 transition-colors"
+          className="inline-flex items-center gap-2 rounded-2xl bg-brand-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-gray-950/20 hover:bg-gray-800 transition-colors"
         >
           <Phone className="h-4 w-4" /> Tap to call
         </a>
@@ -235,7 +235,7 @@ function CallbackForm() {
       <button
         onClick={submit}
         disabled={submitting}
-        className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-950 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:pointer-events-none"
+        className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-500 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:pointer-events-none"
       >
         {submitting ? "Sending…" : (
           <><ChevronRight className="h-4 w-4" /> Request callback</>
@@ -254,7 +254,7 @@ function LandingField({ label, ...props }) {
     <label className="block space-y-1.5">
       <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">{label}</span>
       <input
-        className="w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-900 placeholder-gray-400 outline-none focus:border-gray-950 focus:ring-4 focus:ring-gray-950/8 transition"
+        className="w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-900 placeholder-gray-400 outline-none focus:border-brand-500 focus:ring-4 focus:ring-gray-950/8 transition"
         {...props}
       />
     </label>
@@ -296,7 +296,7 @@ function FeatureCard({ icon: Icon, title, body, delay = 0 }) {
       }`}
       style={{ transitionDelay: `${delay}ms` }}
     >
-      <div className="grid h-10 w-10 place-items-center rounded-2xl bg-gray-950 text-white shadow-lg shadow-gray-950/20">
+      <div className="grid h-10 w-10 place-items-center rounded-2xl bg-brand-500 text-white shadow-lg shadow-gray-950/20">
         <Icon className="h-5 w-5" />
       </div>
       <div>
@@ -325,7 +325,7 @@ export default function Landing() {
       <header className="sticky top-0 z-50 border-b border-gray-100 bg-white/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-xl bg-gray-950 text-white shadow-lg shadow-gray-950/20">
+            <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-500 text-white shadow-lg shadow-gray-950/20">
               <Bot className="h-5 w-5" />
             </div>
             <span className="text-sm font-semibold text-gray-950">VoxPilot AI</span>
@@ -343,7 +343,7 @@ export default function Landing() {
             </Link>
             <Link
               to="/register"
-              className="inline-flex items-center gap-1.5 rounded-xl bg-gray-950 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-800 transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-800 transition-colors"
             >
               Get started <ArrowRight className="h-3.5 w-3.5" />
             </Link>
@@ -377,7 +377,7 @@ export default function Landing() {
           <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
             <a
               href="#demo"
-              className="inline-flex items-center gap-2 rounded-2xl bg-gray-950 px-7 py-3.5 text-sm font-semibold text-white shadow-lg shadow-gray-950/20 hover:bg-gray-800 transition-colors"
+              className="inline-flex items-center gap-2 rounded-2xl bg-brand-500 px-7 py-3.5 text-sm font-semibold text-white shadow-lg shadow-gray-950/20 hover:bg-gray-800 transition-colors"
             >
               <PhoneCall className="h-4 w-4" /> Try it now — call for free
             </a>
@@ -448,7 +448,7 @@ export default function Landing() {
           </p>
           <Link
             to="/register"
-            className="mt-8 inline-flex items-center gap-2 rounded-2xl bg-gray-950 px-8 py-4 text-sm font-semibold text-white shadow-xl shadow-gray-950/20 hover:bg-gray-800 transition-colors"
+            className="mt-8 inline-flex items-center gap-2 rounded-2xl bg-brand-500 px-8 py-4 text-sm font-semibold text-white shadow-xl shadow-gray-950/20 hover:bg-gray-800 transition-colors"
           >
             Create your free account <ArrowRight className="h-4 w-4" />
           </Link>
@@ -459,7 +459,7 @@ export default function Landing() {
       <footer className="border-t border-gray-100 bg-white py-10">
         <div className="mx-auto max-w-6xl px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-400">
           <div className="flex items-center gap-2">
-            <div className="grid h-7 w-7 place-items-center rounded-lg bg-gray-950 text-white">
+            <div className="grid h-7 w-7 place-items-center rounded-lg bg-brand-500 text-white">
               <Bot className="h-4 w-4" />
             </div>
             <span className="font-semibold text-gray-950">VoxPilot AI</span>

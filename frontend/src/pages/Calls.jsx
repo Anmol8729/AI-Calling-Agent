@@ -346,7 +346,7 @@ export default function Calls() {
               const isCaller = (turn.role || "").toLowerCase() === "user";
               return (
                 <div key={i} className={`flex ${isCaller ? "justify-start" : "justify-end"}`}>
-                  <div className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${isCaller ? "bg-gray-100 text-gray-900" : "bg-gray-950 text-white"}`}>
+                  <div className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${isCaller ? "bg-gray-100 text-gray-900" : "bg-brand-500 text-white"}`}>
                     <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider opacity-60">{isCaller ? "Caller" : "AI Receptionist"}</p>
                     {turn.content}
                   </div>

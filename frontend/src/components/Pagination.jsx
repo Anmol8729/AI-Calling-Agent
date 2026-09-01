@@ -89,7 +89,7 @@ export default function Pagination({
 
       {showSizePicker && (
         <select
-          className="rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-700 focus:border-gray-950 focus:outline-none"
+          className="rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-700 focus:border-brand-500 focus:outline-none"
           value={pageSize}
           onChange={(e) => onPageSizeChange(Number(e.target.value))}
           aria-label={`Rows per page`}

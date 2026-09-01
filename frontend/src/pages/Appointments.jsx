@@ -621,7 +621,7 @@ export default function Appointments() {
                 <input
                   type="number"
                   min="0"
-                  className="w-20 rounded-xl border border-gray-200 px-3 py-2 text-sm focus:border-gray-950 focus:outline-none"
+                  className="w-20 rounded-xl border border-gray-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none"
                   placeholder="#"
                   value={setNum}
                   onChange={(e) => setSetNum(e.target.value)}
@@ -795,7 +795,7 @@ export default function Appointments() {
           <div className="sm:col-span-2">
             <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">Existing {labels.contact.toLowerCase()}</label>
             <select
-              className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
+              className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
               value={selectedContactId}
               onChange={onSelectContact}
             >
@@ -814,7 +814,7 @@ export default function Appointments() {
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">Length</label>
                 <select
-                  className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
+                  className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
                   value={form.duration_min}
                   onChange={updateField("duration_min")}
                 >
@@ -847,7 +847,7 @@ export default function Appointments() {
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">Length</label>
             <select
-              className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
+              className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
               value={reDur}
               onChange={(e) => setReDur(e.target.value)}
             >
@@ -937,7 +937,7 @@ function FilterChip({ active, onClick, children }) {
       aria-pressed={active}
       className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
         active
-          ? "border-gray-950 bg-gray-950 text-white"
+          ? "border-brand-500 bg-brand-500 text-white"
           : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
       }`}
     >
@@ -952,7 +952,7 @@ function Field({ label, value, onChange, placeholder, type = "text" }) {
       <span className="block text-xs font-semibold uppercase tracking-wider text-gray-500">{label}</span>
       <input
         type={type}
-        className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
+        className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
         value={value}
         onChange={onChange}
         placeholder={placeholder}

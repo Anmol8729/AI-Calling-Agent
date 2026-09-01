@@ -54,7 +54,7 @@ export default function GoogleSignInButton({ label = "Continue with Google" }) {
         type="button"
         onClick={handleClick}
         disabled={busy}
-        className="flex w-full items-center justify-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-950 disabled:opacity-50"
+        className="flex w-full items-center justify-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-50"
       >
         {busy ? (
           <Loader2 className="h-5 w-5 animate-spin" />

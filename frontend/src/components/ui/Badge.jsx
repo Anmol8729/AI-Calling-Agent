@@ -6,7 +6,7 @@ const styles = {
   // not met yet, for instance. Reads as informational rather than as a warning.
   info: "bg-blue-50 text-blue-700 ring-blue-200",
   neutral: "bg-gray-100 text-gray-700 ring-gray-200",
-  dark: "bg-gray-950 text-white ring-gray-950",
+  dark: "bg-brand-500 text-white ring-brand-500",
 };
 
 export function Badge({ children, tone = "neutral" }) {

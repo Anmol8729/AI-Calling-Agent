@@ -564,7 +564,7 @@ function Field({ label, value, onChange, placeholder, type = "text" }) {
       <span className="block text-xs font-semibold uppercase tracking-wider text-gray-500">{label}</span>
       <input
         type={type}
-        className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
+        className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
         value={value}
         onChange={onChange}
         placeholder={placeholder}

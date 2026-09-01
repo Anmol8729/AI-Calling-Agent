@@ -129,13 +129,13 @@ export default function Account() {
           <Banner msg={profileMsg} />
           <div className="space-y-3">
             <Labeled label="Name">
-              <input className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none" value={name} onChange={(e) => setName(e.target.value)} disabled={loading} />
+              <input className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none" value={name} onChange={(e) => setName(e.target.value)} disabled={loading} />
             </Labeled>
             <Labeled label="Email">
-              <input className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none bg-gray-50 text-gray-500" value={profile.email} disabled readOnly />
+              <input className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none bg-gray-50 text-gray-500" value={profile.email} disabled readOnly />
             </Labeled>
             <Labeled label="Role">
-              <input className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none bg-gray-50 text-gray-500 capitalize" value={profile.role} disabled readOnly />
+              <input className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none bg-gray-50 text-gray-500 capitalize" value={profile.role} disabled readOnly />
             </Labeled>
           </div>
           <div className="flex justify-end">
@@ -153,13 +153,13 @@ export default function Account() {
           <Banner msg={pwdMsg} />
           <div className="space-y-3">
             <Labeled label="Current password">
-              <input type="password" className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+              <input type="password" className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
             </Labeled>
             <Labeled label="New password">
-              <input type="password" className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+              <input type="password" className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
             </Labeled>
             <Labeled label="Confirm new password">
-              <input type="password" className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+              <input type="password" className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
             </Labeled>
           </div>
           <div className="flex justify-end">

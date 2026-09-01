@@ -160,7 +160,7 @@ export default function Billing() {
             return (
               <article
                 key={p.key}
-                className={`panel flex flex-col rounded-3xl p-5 ${isCurrent ? "ring-2 ring-gray-950" : ""}`}
+                className={`panel flex flex-col rounded-3xl p-5 ${isCurrent ? "ring-2 ring-brand-500" : ""}`}
               >
                 <div className="flex items-center justify-between">
                   <h3 className="text-base font-semibold text-gray-950">{p.name}</h3>
@@ -230,7 +230,7 @@ export default function Billing() {
         <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">Note (optional)</label>
         <textarea
           rows={3}
-          className="mt-1 w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
+          className="mt-1 w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
           placeholder="Anything we should know (expected call volume, timeline, etc.)"
           value={note}
           onChange={(e) => setNote(e.target.value)}

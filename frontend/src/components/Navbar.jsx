@@ -46,7 +46,7 @@ export default function Navbar({ onMenuClick }) {
         <div className="ml-auto flex items-center gap-3">
           <NotificationsBell />
           <div className="flex items-center gap-3 rounded-2xl border border-gray-200 bg-white py-1 pl-1 pr-3 shadow-sm">
-            <div className="grid h-8 w-8 place-items-center rounded-xl bg-gray-950 text-xs font-bold text-white">
+            <div className="grid h-8 w-8 place-items-center rounded-xl bg-brand-500 text-xs font-bold text-white">
               {initials}
             </div>
             <div className="hidden sm:block">

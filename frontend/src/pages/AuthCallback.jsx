@@ -82,7 +82,7 @@ export default function AuthCallback() {
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12">
       <div className="w-full max-w-md space-y-6 rounded-3xl border border-gray-200 bg-white p-8 text-center shadow-xl shadow-gray-900/5">
         <div className="flex justify-center">
-          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gray-950 text-white shadow-lg shadow-gray-950/20">
+          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-500 text-white shadow-lg shadow-gray-950/20">
             <Bot className="h-6 w-6" />
           </div>
         </div>
@@ -96,7 +96,7 @@ export default function AuthCallback() {
             <button
               type="button"
               onClick={() => navigate("/login", { replace: true })}
-              className="w-full rounded-2xl bg-gray-950 px-4 py-3 text-sm font-semibold text-white shadow hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-950"
+              className="w-full rounded-2xl bg-brand-500 px-4 py-3 text-sm font-semibold text-white shadow hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500"
             >
               Back to sign in
             </button>

@@ -166,7 +166,7 @@ export default function Setup() {
           <div className="flex-1">
             <Label>Your industry</Label>
             <select
-              className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
+              className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
               value={industry}
               onChange={(e) => setIndustry(e.target.value)}
             >
@@ -191,7 +191,7 @@ export default function Setup() {
       <Section icon={CalendarPlus} title="Booking">
         <Label>How you book appointments</Label>
         <select
-          className="mt-1 w-full max-w-sm rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
+          className="mt-1 w-full max-w-sm rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
           value={bookingMode}
           onChange={(e) => setBookingMode(e.target.value)}
         >
@@ -205,7 +205,7 @@ export default function Setup() {
       <Section icon={Languages} title="Language">
         <Label>Language your callers speak</Label>
         <select
-          className="mt-1 w-full max-w-sm rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
+          className="mt-1 w-full max-w-sm rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
           value={language || "hi"}
           onChange={(e) => setLanguage(e.target.value)}
         >
@@ -218,7 +218,7 @@ export default function Setup() {
       <Section icon={Mic2} title="Voice">
         <Label>Assistant voice</Label>
         <select
-          className="mt-1 w-full max-w-sm rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
+          className="mt-1 w-full max-w-sm rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
           value={voiceCustom ? "__custom__" : (voice || "Calm_Woman")}
           onChange={(e) => {
             if (e.target.value === "__custom__") { setVoiceCustom(true); setVoice(""); }
@@ -231,7 +231,7 @@ export default function Setup() {
         {voiceCustom && (
           <input
             type="text"
-            className="mt-2 w-full max-w-sm rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
+            className="mt-2 w-full max-w-sm rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
             value={voice}
             onChange={(e) => setVoice(e.target.value)}
             placeholder="Paste your cloned voice ID"
@@ -245,7 +245,7 @@ export default function Setup() {
         <Label>Business information</Label>
         <textarea
           rows={12}
-          className="mt-1 w-full rounded-2xl border border-gray-200 p-4 text-sm leading-6 focus:border-gray-950 focus:outline-none"
+          className="mt-1 w-full rounded-2xl border border-gray-200 p-4 text-sm leading-6 focus:border-brand-500 focus:outline-none"
           placeholder={KB_PLACEHOLDER}
           value={knowledge}
           onChange={(e) => setKnowledge(e.target.value)}
@@ -261,7 +261,7 @@ export default function Setup() {
           <Label>How your assistant should behave</Label>
           <textarea
             rows={5}
-            className="mt-1 w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
+            className="mt-1 w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
             value={behavior}
             onChange={(e) => setBehavior(e.target.value)}
             placeholder="You are a warm, professional receptionist for a business. Book appointments and answer questions using the business information..."

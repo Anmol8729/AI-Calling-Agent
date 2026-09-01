@@ -29,7 +29,7 @@ export default function ForgotPassword() {
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12">
       <div className="w-full max-w-md space-y-8 rounded-3xl border border-gray-200 bg-white p-8 shadow-xl shadow-gray-900/5">
         <div className="flex flex-col items-center">
-          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gray-950 text-white shadow-lg shadow-gray-950/20">
+          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-500 text-white shadow-lg shadow-gray-950/20">
             <Bot className="h-6 w-6" />
           </div>
           <h2 className="mt-6 text-center text-3xl font-semibold tracking-tight text-gray-950">Reset your password</h2>
@@ -54,7 +54,7 @@ export default function ForgotPassword() {
                 id="email"
                 type="email"
                 required
-                className="mt-1 block w-full rounded-2xl border border-gray-200 px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-gray-950 focus:outline-none focus:ring-1 focus:ring-gray-950 sm:text-sm"
+                className="mt-1 block w-full rounded-2xl border border-gray-200 px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:text-sm"
                 placeholder="Email address"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -63,7 +63,7 @@ export default function ForgotPassword() {
             <button
               type="submit"
               disabled={loading}
-              className="flex w-full justify-center rounded-2xl bg-gray-950 px-4 py-3 text-sm font-semibold text-white shadow hover:bg-gray-900 disabled:opacity-50"
+              className="flex w-full justify-center rounded-2xl bg-brand-500 px-4 py-3 text-sm font-semibold text-white shadow hover:bg-brand-600 disabled:opacity-50"
             >
               {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Send reset link"}
             </button>

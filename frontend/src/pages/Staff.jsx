@@ -318,7 +318,7 @@ export default function Staff() {
             <div className="mt-1 flex gap-2">
               <input
                 type={showPassword ? "text" : "password"}
-                className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
+                className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
                 placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
                 value={form.password}
                 onChange={updateField("password")}
@@ -389,7 +389,7 @@ function Field({ label, value, onChange, placeholder, type = "text" }) {
       <span className="block text-xs font-semibold uppercase tracking-wider text-gray-500">{label}</span>
       <input
         type={type}
-        className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
+        className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
         value={value}
         onChange={onChange}
         placeholder={placeholder}

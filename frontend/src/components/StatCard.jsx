@@ -5,7 +5,7 @@ export default function StatCard({ title, value, change, icon: Icon, tone = "dar
   const dark = tone === "dark";
 
   return (
-    <div className={`rounded-3xl p-5 ${dark ? "border border-gray-900 bg-gray-950 shadow-2xl shadow-gray-950/15" : "panel"}`}>
+    <div className={`rounded-3xl p-5 ${dark ? "border border-brand-600 bg-brand-500 shadow-2xl shadow-gray-950/15" : "panel"}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className={`text-sm ${dark ? "text-gray-400" : "text-gray-500"}`}>{title}</p>

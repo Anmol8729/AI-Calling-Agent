@@ -248,7 +248,7 @@ export default function Admin() {
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">Plan</label>
             <select
-              className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
+              className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
               value={planKey}
               onChange={(e) => setPlanKey(e.target.value)}
             >
@@ -262,7 +262,7 @@ export default function Admin() {
             <input
               type="number"
               min="0"
-              className="mt-1 w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-gray-950 focus:outline-none"
+              className="mt-1 w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
               placeholder="Leave blank to use the plan default"
               value={allowance}
               onChange={(e) => setAllowance(e.target.value)}
