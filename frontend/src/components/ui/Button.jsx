@@ -6,7 +6,10 @@ export function Button({
   ...props
 }) {
   const variants = {
-    primary: "bg-gray-950 text-white hover:bg-gray-800 shadow-sm",
+    // Bright blue, not navy: this is the app's primary action, and editing the shared
+    // Button is what makes every primary button on every page pick it up at once.
+    // Clarivo blue on hover.
+    primary: "bg-brand-500 text-white hover:bg-brand-600 shadow-sm",
     secondary: "bg-white text-gray-900 border border-gray-200 hover:bg-gray-50",
     ghost: "text-gray-600 hover:bg-gray-100 hover:text-gray-950",
     danger: "bg-red-600 text-white hover:bg-red-500",

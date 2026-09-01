@@ -1,8 +1,52 @@
 @import "tailwindcss";
 
+/*
+ * Clarivo colour theme.
+ *
+ * The app writes Tailwind's `gray-*` utilities directly — 574 times across 37 files —
+ * so the theme lives here rather than in the components: redefining the ramp recolours
+ * every one of those usages at once. Nothing about the layout, spacing or component
+ * structure changes.
+ *
+ * Tailwind v4 is configured in CSS, not tailwind.config.js. That file is left alone
+ * because v4 ignores it (its `content` globs point at Next.js paths this Vite app does
+ * not even have).
+ *
+ * The ramp stays monotonic light-to-dark so every existing pairing keeps the contrast it
+ * was written for: text-gray-500 on bg-white, border-gray-200, hover:bg-gray-50 and so on
+ * all still read the same way, just in navy instead of neutral grey.
+ *
+ * Status colours are deliberately absent: Tailwind's emerald-500, amber-500 and red-500
+ * are already exactly #10B981, #F59E0B and #EF4444, so success, warning and error need no
+ * override at all.
+ */
+@theme {
+  /* ----- structural ramp: neutral grey -> Clarivo navy ----- */
+  --color-gray-50: #f7fafd;  /* page background        */
+  --color-gray-100: #eaf6ff; /* subtle highlight fills */
+  --color-gray-200: #dce7f2; /* borders and dividers   */
+  --color-gray-300: #c2d4e8;
+  --color-gray-400: #93a8c2; /* placeholders, muted icons */
+  --color-gray-500: #64748b; /* secondary text         */
+  --color-gray-600: #4b5c77;
+  --color-gray-700: #334463;
+  --color-gray-800: #1b2c4f; /* hover on dark surfaces */
+  --color-gray-900: #0a1f4d; /* navy blue              */
+  --color-gray-950: #061329; /* deep navy: dark surfaces and primary text */
+
+  /* ----- brand accents -----
+   * Bright blue is the primary interactive colour; Clarivo blue is its pressed state.
+   * Cyan is a secondary accent only, and is used in exactly one existing place (the
+   * voice waveform below) rather than being sprinkled around. */
+  --color-brand-50: #eaf6ff;
+  --color-brand-500: #0066d9;
+  --color-brand-600: #003f9e;
+  --color-brand-cyan: #00b8f0;
+}
+
 :root {
-  color: #111827;
-  background: #f6f7f9;
+  color: #061329;
+  background: #f7fafd;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -25,26 +69,27 @@ textarea {
   font: inherit;
 }
 
+/* Shadow geometry unchanged; only the tint moves from slate to navy. */
 .glass-card {
   border: 1px solid rgb(255 255 255 / 0.72);
   background: rgb(255 255 255 / 0.82);
-  box-shadow: 0 20px 60px rgb(15 23 42 / 0.08);
+  box-shadow: 0 20px 60px rgb(6 19 41 / 0.08);
   backdrop-filter: blur(18px);
 }
 
 .panel {
-  border: 1px solid rgb(226 232 240 / 0.9);
+  border: 1px solid rgb(220 231 242 / 0.9);
   background: white;
-  box-shadow: 0 16px 44px rgb(15 23 42 / 0.06);
+  box-shadow: 0 16px 44px rgb(6 19 41 / 0.06);
 }
 
 .field {
   width: 100%;
   border-radius: 0.875rem;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #dce7f2;
   background: #ffffff;
   padding: 0.75rem 0.875rem;
-  color: #111827;
+  color: #061329;
   outline: none;
   transition:
     border-color 150ms ease,
@@ -53,12 +98,14 @@ textarea {
 }
 
 .field::placeholder {
-  color: #9ca3af;
+  color: #93a8c2;
 }
 
+/* Navy, matching the `focus:border-gray-950` inputs elsewhere in the app, so every
+   field indicates focus the same way. */
 .field:focus {
-  border-color: #111827;
-  box-shadow: 0 0 0 4px rgb(17 24 39 / 0.08);
+  border-color: #061329;
+  box-shadow: 0 0 0 4px rgb(6 19 41 / 0.08);
 }
 
 .status-dot {
@@ -68,10 +115,12 @@ textarea {
   display: inline-block;
 }
 
+/* The landing page's voice waveform — an AI highlight, and the one element in the app
+   where cyan belongs. It was near-black before. */
 .wave-bar {
   width: 4px;
   border-radius: 999px;
-  background: #111827;
+  background: #00b8f0;
   animation: wave 900ms ease-in-out infinite;
 }
 

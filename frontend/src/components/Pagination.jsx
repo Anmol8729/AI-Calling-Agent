@@ -62,7 +62,8 @@ export default function Pagination({
                 type="button"
                 className={`${btn} ${
                   n === page
-                    ? "bg-gray-950 font-semibold text-white"
+                    // Selected state, so brand blue rather than the structural navy.
+                    ? "bg-brand-500 font-semibold text-white"
                     : "text-gray-600 hover:bg-gray-100 hover:text-gray-950"
                 }`}
                 onClick={() => go(n)}
