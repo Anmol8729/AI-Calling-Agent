@@ -92,21 +92,21 @@ export default function Sidebar({ open, onClose }) {
         onClick={onClose}
       />
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-gray-200 bg-white/90 px-4 py-5 shadow-2xl shadow-gray-950/10 backdrop-blur-xl transition-transform lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-navy-800 bg-navy-900 px-4 py-5 shadow-2xl shadow-navy-900/10 backdrop-blur-xl transition-transform lg:translate-x-0 ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         <div className="flex items-center justify-between px-2">
           <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-2xl bg-brand-500 text-white shadow-lg shadow-gray-950/20">
+            <div className="grid h-10 w-10 place-items-center rounded-2xl bg-brand-500 text-white shadow-lg shadow-navy-900/20">
               <Bot className="h-5 w-5" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-gray-950">Clarivo</p>
-              <p className="text-xs text-gray-500">Inbound reception</p>
+              <p className="text-sm font-semibold text-white">Clarivo</p>
+              <p className="text-xs text-navy-200">Inbound reception</p>
             </div>
           </div>
-          <button className="rounded-xl p-2 text-gray-500 hover:bg-gray-100 lg:hidden" onClick={onClose}>
+          <button className="rounded-xl p-2 text-navy-200 hover:bg-navy-800 lg:hidden" onClick={onClose}>
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -120,8 +120,8 @@ export default function Sidebar({ open, onClose }) {
               className={({ isActive }) =>
                 `flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition ${
                   isActive
-                    ? "bg-brand-500 text-white shadow-lg shadow-gray-950/15"
-                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-950"
+                    ? "bg-brand-500 text-white shadow-lg shadow-navy-900/15"
+                    : "text-navy-100 hover:bg-navy-800 hover:text-white"
                 }`
               }
             >
@@ -131,26 +131,26 @@ export default function Sidebar({ open, onClose }) {
           ))}
           <button
             onClick={handleLogout}
-            className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 transition cursor-pointer"
+            className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium text-red-400 hover:bg-navy-800 hover:text-red-300 transition cursor-pointer"
           >
             <LogOut className="h-4 w-4" />
             Logout
           </button>
         </nav>
 
-        <div className="mt-auto rounded-3xl border border-gray-200 bg-gray-50 p-4">
+        <div className="mt-auto rounded-3xl border border-navy-800 bg-navy-800/50 p-4">
           {numbers === null ? (
-            <div className="flex items-center gap-2 text-sm text-gray-400">
-              <span className="status-dot bg-gray-300" />
+            <div className="flex items-center gap-2 text-sm text-navy-200">
+              <span className="status-dot bg-navy-200" />
               Checking numbers…
             </div>
           ) : totalNumbers > 0 ? (
             <>
-              <div className="flex items-center gap-2 text-sm font-semibold text-gray-950">
+              <div className="flex items-center gap-2 text-sm font-semibold text-white">
                 <span className={`status-dot ${activeNumbers > 0 ? "bg-emerald-500" : "bg-amber-500"}`} />
                 {totalNumbers} number{totalNumbers === 1 ? "" : "s"} connected
               </div>
-              <p className="mt-2 text-xs leading-5 text-gray-500">
+              <p className="mt-2 text-xs leading-5 text-navy-200">
                 {activeNumbers > 0
                   ? `${activeNumbers} active — calls are answered by your AI receptionist.`
                   : "All numbers are inactive. Activate one in Agent Setup to receive calls."}
@@ -160,22 +160,22 @@ export default function Sidebar({ open, onClose }) {
               <NavLink
                 to="/setup"
                 onClick={onClose}
-                className="mt-3 flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-900 transition hover:bg-gray-50"
+                className="mt-3 flex items-center justify-between rounded-2xl border border-navy-800 bg-navy-900 px-3 py-2 text-xs font-medium text-white transition hover:bg-navy-800"
               >
                 Manage numbers
-                <ChevronRight className="h-3.5 w-3.5 text-gray-400" />
+                <ChevronRight className="h-3.5 w-3.5 text-navy-200" />
               </NavLink>
             </>
           ) : (
             <>
-              <div className="flex items-center gap-2 text-sm font-semibold text-gray-950">
+              <div className="flex items-center gap-2 text-sm font-semibold text-white">
                 <span className="status-dot bg-amber-500" />
                 No number connected
               </div>
               <NavLink
                 to="/setup"
                 onClick={onClose}
-                className="mt-2 inline-block text-xs font-medium text-gray-900 hover:underline"
+                className="mt-2 inline-block text-xs font-medium text-white hover:underline"
               >
                 Connect a number in Agent Setup →
               </NavLink>

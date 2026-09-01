@@ -22,31 +22,40 @@
  */
 @theme {
   /* ----- structural ramp: neutral grey -> Clarivo navy ----- */
-  --color-gray-50: #f7fafd;  /* page background        */
-  --color-gray-100: #eaf6ff; /* subtle highlight fills */
-  --color-gray-200: #dce7f2; /* borders and dividers   */
-  --color-gray-300: #c2d4e8;
-  --color-gray-400: #93a8c2; /* placeholders, muted icons */
-  --color-gray-500: #64748b; /* secondary text         */
-  --color-gray-600: #4b5c77;
-  --color-gray-700: #334463;
-  --color-gray-800: #1b2c4f; /* hover on dark surfaces */
-  --color-gray-900: #0a1f4d; /* navy blue              */
-  --color-gray-950: #061329; /* deep navy: dark surfaces and primary text */
+  --color-gray-50: #f7f9fc;  /* application background */
+  --color-gray-100: #eaf5ff; /* light blue accent fills */
+  --color-gray-200: #dfe8f3; /* borders and dividers   */
+  --color-gray-300: #c5d6e8;
+  --color-gray-400: #93a6c2; /* placeholders, muted icons */
+  --color-gray-500: #5f7395; /* secondary text         */
+  --color-gray-600: #4a5c7c;
+  --color-gray-700: #32435f;
+  --color-gray-800: #1a2a4a;
+  --color-gray-900: #09265a;
+  --color-gray-950: #071a3d; /* primary text           */
 
   /* ----- brand accents -----
-   * Bright blue is the primary interactive colour; Clarivo blue is its pressed state.
-   * Cyan is a secondary accent only, and is used in exactly one existing place (the
-   * voice waveform below) rather than being sprinkled around. */
-  --color-brand-50: #eaf6ff;
-  --color-brand-500: #0066d9;
-  --color-brand-600: #003f9e;
-  --color-brand-cyan: #00b8f0;
+   * Electric blue is the primary action colour and 600 is its hover. Note 600 is
+   * LIGHTER than 500 here: the brand calls for #0063FA on hover, so the pair is
+   * deliberately in that order rather than darkening on hover as a ramp usually would.
+   * Cyan stays an accent, used in exactly one existing place (the waveform below). */
+  --color-brand-50: #eaf5ff;
+  --color-brand-500: #0054f5;
+  --color-brand-600: #0063fa;
+  --color-brand-cyan: #00c2fa;
+
+  /* ----- sidebar -----
+   * Its own scale because the sidebar is the one dark region in the app: the shared
+   * ramp has to keep working for dark-text-on-white everywhere else. */
+  --color-navy-900: #021438; /* sidebar background     */
+  --color-navy-800: #09265a; /* hover / hairlines on navy */
+  --color-navy-200: #b9cbe3; /* muted text and icons on navy */
+  --color-navy-100: #d5e1f2; /* inactive navigation text */
 }
 
 :root {
-  color: #061329;
-  background: #f7fafd;
+  color: #071a3d;
+  background: #f7f9fc;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -73,23 +82,23 @@ textarea {
 .glass-card {
   border: 1px solid rgb(255 255 255 / 0.72);
   background: rgb(255 255 255 / 0.82);
-  box-shadow: 0 20px 60px rgb(6 19 41 / 0.08);
+  box-shadow: 0 20px 60px rgb(2 20 56 / 0.08);
   backdrop-filter: blur(18px);
 }
 
 .panel {
-  border: 1px solid rgb(220 231 242 / 0.9);
+  border: 1px solid rgb(223 232 243 / 0.9);
   background: white;
-  box-shadow: 0 16px 44px rgb(6 19 41 / 0.06);
+  box-shadow: 0 16px 44px rgb(2 20 56 / 0.06);
 }
 
 .field {
   width: 100%;
   border-radius: 0.875rem;
-  border: 1px solid #dce7f2;
+  border: 1px solid #dfe8f3;
   background: #ffffff;
   padding: 0.75rem 0.875rem;
-  color: #061329;
+  color: #071a3d;
   outline: none;
   transition:
     border-color 150ms ease,
@@ -98,14 +107,14 @@ textarea {
 }
 
 .field::placeholder {
-  color: #93a8c2;
+  color: #93a6c2;
 }
 
-/* Navy, matching the `focus:border-gray-950` inputs elsewhere in the app, so every
-   field indicates focus the same way. */
+/* Electric blue, matching the `focus:border-brand-500` inputs elsewhere in the app, so
+   every field indicates focus the same way. */
 .field:focus {
-  border-color: #061329;
-  box-shadow: 0 0 0 4px rgb(6 19 41 / 0.08);
+  border-color: #0054f5;
+  box-shadow: 0 0 0 4px rgb(0 84 245 / 0.12);
 }
 
 .status-dot {
@@ -120,7 +129,7 @@ textarea {
 .wave-bar {
   width: 4px;
   border-radius: 999px;
-  background: #00b8f0;
+  background: #00c2fa;
   animation: wave 900ms ease-in-out infinite;
 }
 
