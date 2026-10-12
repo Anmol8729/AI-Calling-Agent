@@ -1336,3 +1336,49 @@ class TestTenantApprovalSecurityContracts:
         assert "tenant_status != \"active\"" in source
         assert "quota_exceeded = True" in source
 
+
+# --------------------------------------------------------------------------
+# Voice Agent Failover & Token Optimization
+# --------------------------------------------------------------------------
+class TestVoiceAgentFailoverAndTokenOptimizationContracts:
+    """Contracts for multi-provider LLM failover and system prompt token limits."""
+
+    def test_gemini_compat_llm_and_thought_signature_injection(self):
+        import pathlib
+
+        source = (
+            pathlib.Path(__file__).resolve().parents[2] / "agent" / "main.py"
+        ).read_text(encoding="utf-8")
+
+        assert "class _GeminiCompatLLM" in source
+        assert "_ensure_gemini_thought_signatures" in source
+        assert "skip_thought_signature_validator" in source
+
+    def test_strict_schema_llm_strips_chat_extra(self):
+        import pathlib
+
+        source = (
+            pathlib.Path(__file__).resolve().parents[2] / "agent" / "main.py"
+        ).read_text(encoding="utf-8")
+
+        assert "class _StrictSchemaLLM" in source
+        assert "_strip_chat_extra" in source
+        assert "extra_content" in source
+
+    def test_system_prompt_token_optimization(self):
+        import pathlib
+
+        source = (
+            pathlib.Path(__file__).resolve().parents[2] / "agent" / "main.py"
+        ).read_text(encoding="utf-8")
+
+        # Core guidelines are compact and non-redundant
+        assert "CRITICAL RULES:" in source
+        assert "PATIENT INTAKE (collect one at a time ONLY when booking):" in source
+        assert "SPOKEN FORMAT (read literally by TTS):" in source
+        # Combined guide tokens trimmed to prevent Groq TPM exhaustion
+        tool_rules_idx = source.index("TOOL_RULES = (")
+        default_greeting_idx = source.index("DEFAULT_GREETING =")
+        guides_block = source[tool_rules_idx:default_greeting_idx]
+        assert len(guides_block) < 3500, f"Prompt guides exceeded budget: {len(guides_block)} chars"
+

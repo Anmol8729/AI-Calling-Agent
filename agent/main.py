@@ -111,6 +111,38 @@ class _StrictSchemaLLM(openai.LLM):
         return super().chat(chat_ctx=_strip_chat_extra(chat_ctx), **kwargs)
 
 
+def _ensure_gemini_thought_signatures(chat_ctx: "_lk_llm.ChatContext") -> "_lk_llm.ChatContext":
+    """Return a copy of `chat_ctx` ensuring every tool call has a Gemini thought signature.
+
+    When Groq or MiniMax generates a tool call and the chain falls back to Gemini,
+    Gemini's OpenAI endpoint rejects previous function calls that lack a
+    `thought_signature` with HTTP 400 INVALID_ARGUMENT.
+
+    Injecting Google's official bypass signature `skip_thought_signature_validator`
+    on any function call that does not already have a signature allows Gemini
+    to seamlessly resume multi-turn conversations started by other providers.
+    """
+    items = []
+    dirty = False
+    for item in chat_ctx.items:
+        if getattr(item, "type", None) == "function_call":
+            extra = dict(getattr(item, "extra", None) or {})
+            google_extra = extra.get("google")
+            if not isinstance(google_extra, dict) or not google_extra.get("thought_signature"):
+                extra["google"] = {"thought_signature": "skip_thought_signature_validator"}
+                item = item.model_copy(update={"extra": extra})
+                dirty = True
+        items.append(item)
+    return _lk_llm.ChatContext(items) if dirty else chat_ctx
+
+
+class _GeminiCompatLLM(openai.LLM):
+    """openai.LLM for Gemini ensuring all tool calls satisfy Gemini's multi-turn schema."""
+
+    def chat(self, *, chat_ctx: "_lk_llm.ChatContext", **kwargs):  # type: ignore[override]
+        return super().chat(chat_ctx=_ensure_gemini_thought_signatures(chat_ctx), **kwargs)
+
+
 # Where the FastAPI backend lives + the shared secret for the internal agent
 # endpoints. Both read from the root .env. If the secret is empty, all DB actions
 # are disabled (the backend returns 401), so set AGENT_INTERNAL_SECRET in .env.
@@ -145,121 +177,69 @@ _GOOD_VOICES = {
 # number, say "booked") instead of calling tools, so the rules are stated firmly
 # and injected FIRST (most salient) in _build_system_prompt().
 TOOL_RULES = (
-    "CRITICAL RULES — follow these exactly:\n"
-    "- You do NOT know any token number, queue position, slot availability, or booking status on "
-    "your own. These facts exist ONLY after you call the matching tool and read its result.\n"
-    "- NEVER tell the caller an appointment is booked, NEVER say a token number, NEVER say which "
-    "number is being served or how many people are ahead, and NEVER say a time is free — UNLESS a "
-    "tool you called in this same conversation returned that exact value. Do not guess or make up "
-    "numbers. If you have not called the tool yet, call it first.\n"
-    "- To actually book, you MUST call book_appointment. Just saying 'booked' does nothing.\n"
-    "- To hang up, you MUST call end_call. Just saying goodbye does NOT end the call.\n"
-    "- NEVER speak or write code, function names, JSON, or tool-call syntax (for example never say "
-    "'functions.book_appointment(...)'). To use a tool, just call it — the caller only ever hears "
-    "plain Hindi.\n"
-    "- Before booking, get the caller's REAL name and CONFIRM it (how to ask + confirm is under "
-    "PATIENT INTAKE below). Never treat filler words like 'ji boliye', 'haan', 'hello', 'bataiye', "
-    "'namaste' as a name.\n"
-    "- Do NOT push, suggest, or bring up booking on your own. Begin collecting booking details (name, "
-    "age, reason) and call book_appointment ONLY when the caller ASKS to book an appointment or to get "
-    "a token/number. If the caller only has a question, answer it and do not ask for their details."
+    "CRITICAL RULES:\n"
+    "- You do NOT know token numbers, queue positions, or slot availability on your own. "
+    "These facts exist ONLY after you call the matching tool and read its result.\n"
+    "- NEVER state an appointment is booked, say a token number, or claim a time is free "
+    "unless a tool returned that exact value in this call. Do not guess.\n"
+    "- To book, you MUST call book_appointment. Just saying 'booked' does nothing.\n"
+    "- To hang up, you MUST call end_call. Just saying goodbye does not end the call.\n"
+    "- NEVER speak or write code, JSON, or tool names. Call tools silently; speak only Hindi to the caller.\n"
+    "- Before booking, obtain and confirm the caller's real name. Never treat filler words "
+    "('ji boliye', 'haan', 'namaste') as names.\n"
+    "- Begin booking ONLY when the caller asks to book or get a token. If the caller only asks a "
+    "question, answer it directly without requesting intake details."
 )
 
 BASE_PERSONA = (
-    "You are a warm, friendly, human female phone receptionist. Speak naturally, like a real person "
-    "on the phone — never robotic, no long lists. Ask only one thing at a time and keep each reply "
-    "to ONE short sentence. If "
-    "something isn't in your business information, say you'll have someone follow up rather than "
-    "guessing. When the caller is done (bye, thanks, 'theek hai'), say one short goodbye and then "
-    "call end_call. Reply with ONLY the words to speak, in Hindi — never your thoughts or any "
-    "English explanation."
+    "You are a warm, friendly female phone receptionist. Speak naturally, ask only one thing at a "
+    "time, and reply in at most ONE short sentence. If information is not in your business facts, "
+    "say someone will follow up rather than guessing. When the caller is done, say a short goodbye "
+    "and call end_call. Speak ONLY in Hindi."
 )
 
 TOKEN_MODE_GUIDE = (
-    "\n\nBOOKING — this business uses TOKEN NUMBERS (a daily queue, no fixed times). Do this ONLY when "
-    "the caller asks to book or get a token/number:\n"
-    "- First complete PATIENT INTAKE below (CONFIRMED name, age, reason). Do NOT ask for a date or "
-    "time. Then CALL book_appointment and tell the caller the EXACT token number it returned.\n"
-    "- If the caller asks which number is being served or how long till their turn, CALL check_queue "
-    "and say only what it returns."
+    "\n\nBOOKING (Daily Token Queue):\n"
+    "- When asked to book/get a token: complete patient intake (confirmed name, age, reason). "
+    "Do NOT ask for date or time. Call book_appointment and tell the caller the exact token returned.\n"
+    "- If asked queue status: call check_queue and report the result."
 )
 
 TIME_MODE_GUIDE = (
-    "\n\nBOOKING — this business uses fixed TIME SLOTS. Do this ONLY when the caller asks to book an "
-    "appointment:\n"
-    "- Complete PATIENT INTAKE below (CONFIRMED name, age, reason), plus the day + time they want. "
-    "Convert the time to ISO-8601 (e.g. 2026-07-02T15:00) using the current date, CALL "
-    "check_availability, and if free CALL book_appointment with that ISO time and the patient "
-    "details. If taken, offer another time. Only confirm after book_appointment returns."
+    "\n\nBOOKING (Time Slots):\n"
+    "- When asked to book: complete patient intake (confirmed name, age, reason) plus desired day and time. "
+    "Convert to ISO-8601 (e.g. 2026-07-02T15:00), call check_availability, and if free call book_appointment."
 )
 
 TOOLS_GUIDE = (
-    "\n\nOTHER TOOLS: use lookup_caller to recognise a returning caller by their number and greet "
-    "them by name; use register_patient to save a new caller's name as a contact when they are not "
-    "booking."
+    "\n\nOTHER TOOLS: Call lookup_caller to recognise returning callers by number; "
+    "call register_patient when a caller gives contact details without booking."
 )
 
-# Healthcare intake: collected step-by-step before a booking. Injected via
-# _build_system_prompt so the model asks for the patient's name (confirmed),
-# age, and reason one at a time — and passes them to book_appointment.
+# Healthcare intake: collected step-by-step before a booking.
 PATIENT_INTAKE_GUIDE = (
-    "\n\nWHEN TO BOOK — begin the booking flow ONLY when the caller asks to book an appointment or to "
-    "get a token/number (e.g. 'appointment chahiye', 'token laga do', 'dikhana hai', 'number laga do'). "
-    "If they only have a question (timings, address, services, fees, etc.), just answer it from your "
-    "business information and ask if there is anything else — do NOT ask their name, age, or reason "
-    "then, and do NOT bring up booking yourself.\n"
-    "\nPATIENT INTAKE — this is a healthcare centre, so ONCE the caller wants to book (and only then), "
-    "collect the patient's details ONE at a time, each in one short Hindi sentence, in this order:\n"
-    "1. NAME — ask the patient's full name. If it was unclear, garbled, or you are unsure, say you "
-    "couldn't hear properly and ask them to repeat it slowly (ask them to spell it if still unclear). "
-    "Then confirm it back, e.g. 'मैं कन्फ़र्म कर लूँ, आपका नाम ___ है ना?', and wait for a yes.\n"
-    "2. AGE — ask the patient's age (umar) in years.\n"
-    "3. REASON — ask briefly what problem or symptom they want to see the doctor for.\n"
-    "Only after you have a CONFIRMED name AND the age, call book_appointment with patient_name, age, "
-    "reason, and gender (ONLY if the caller mentions it). Never invent any of these details; if the "
-    "caller refuses a detail, proceed without it rather than making one up."
+    "\n\nPATIENT INTAKE (collect one at a time ONLY when booking):\n"
+    "1. NAME: Ask the patient's full name. If unclear, ask to repeat. Confirm it back "
+    "('मैं कन्फ़र्म कर लूँ, आपका नाम ___ है ना?') and wait for confirmation.\n"
+    "2. AGE: Ask the patient's age in years.\n"
+    "3. REASON: Ask briefly what problem or symptom they want to see the doctor for.\n"
+    "Call book_appointment only after name is confirmed and age is provided. Never invent details."
 )
 
-# Always appended (even when the tenant has its own system_prompt) so pure Hindi
-# is enforced regardless of the base persona.
+# Always appended to enforce pure spoken Devanagari Hindi.
 LANGUAGE_RULE = (
-    "\n\nLANGUAGE — VERY IMPORTANT: Reply ONLY in natural, everyday spoken Hindi written in "
-    "DEVANAGARI script. Do NOT use Hinglish, do NOT romanize Hindi, and do NOT mix in English words "
-    "— always use the common Hindi word instead. The ONLY exception is an unavoidable proper name "
-    "such as the business name. For example, say 'आपकी बुकिंग हो गई है', not 'aapki booking ho gayi'."
-    # Your text is fed straight to a text-to-speech voice, which reads it LITERALLY.
-    # Observed on a live call: the model shortened डॉक्टर to 'डॉ.' and the voice spoke it
-    # as "दो" (= "two"), so the caller heard "today two Anjali Rao is". Abbreviations and
-    # ASCII digits are the two things that break the spoken output, so both are banned.
-    "\n\nSPOKEN OUTPUT — your words go straight to a voice that reads them EXACTLY as written, "
-    "so write everything the way it should be SPOKEN OUT LOUD:\n"
-    "- NEVER abbreviate. Always write 'डॉक्टर' in full — never 'डॉ.'. No short forms of any kind.\n"
-    "- Write numbers in Devanagari digits (१०, ३००, २) rather than English digits (10, 300, 2).\n"
-    "- Do not use symbols the voice cannot say, such as /, &, %, or brackets — write the word."
+    "\n\nLANGUAGE: Reply ONLY in natural spoken Hindi in DEVANAGARI script. "
+    "Never use Hinglish, romanized Hindi, or English words except the business name.\n"
+    "SPOKEN FORMAT (read literally by TTS):\n"
+    "- NEVER abbreviate. Write 'डॉक्टर' in full (never 'डॉ.').\n"
+    "- Write numbers in Devanagari digits (१०, ३००, २).\n"
+    "- Do not use symbols like /, &, %."
 )
 
-# Always appended (like LANGUAGE_RULE) so brevity still applies when a tenant has
-# its own system_prompt.
-#
-# Observed on a live call: given a detailed knowledge base the model recites
-# EVERYTHING it knows. Asked only "which doctor is in right now?", it read out both
-# doctors' full weekly schedules - ~250 characters, 4.3 seconds of speech. That is
-# the single most expensive habit it has: MiniMax TTS bills per CHARACTER and is
-# about half of the per-call cost, so ~390 wasted characters is ~Rs 2.25 per call.
-# It also makes the caller wait and does not sound like a receptionist.
-# A hard number ("at most 25 words") is obeyed far better than "be brief".
-# A second sentence is not just wordy, it is AUDIBLE: this TTS plugin is
-# non-streaming, so LiveKit synthesizes each sentence in a separate request. Every
-# extra sentence adds its own ~0.6s time-to-first-byte, and the caller hears that as
-# a gap in the middle of the reply ("flush audio emitter due to slow audio
-# generation" in the logs). One sentence = one request = no gap.
+# Always appended to enforce brevity and single-sentence TTS latency optimization.
 BREVITY_RULE = (
-    "\n\nLENGTH — VERY IMPORTANT: Reply with EXACTLY ONE sentence of at most 25 words, and "
-    "NEVER write a second sentence. Answer ONLY what the caller actually asked. Do NOT "
-    "volunteer extra facts, do NOT list other doctors, days, timings, prices or services "
-    "they did not ask for, and do NOT repeat anything you already said. If the full answer "
-    "genuinely needs more, give the single most useful fact in that one sentence and ask "
-    "whether they want the rest."
+    "\n\nLENGTH: Reply with EXACTLY ONE sentence of at most 25 words, and NEVER write a second sentence. "
+    "Answer ONLY what was asked. Never volunteer unsolicited lists, schedules, or pricing tables."
 )
 
 DEFAULT_GREETING = "नमस्ते! मैं आपकी कैसे मदद कर सकती हूँ?"
@@ -1053,7 +1033,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         _gemini_base = os.getenv(
             "GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta/openai/"
         )
-        _chain.append(openai.LLM(
+        _chain.append(_GeminiCompatLLM(
             model=_gemini_model, api_key=_gemini_key, base_url=_gemini_base, temperature=0.3,
         ))
         _labels.append(f"gemini:{_gemini_model}")
@@ -1066,7 +1046,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         # Set GEMINI_FALLBACK_MODEL only once the project is on a paid tier.
         _gemini_fallback = os.getenv("GEMINI_FALLBACK_MODEL", "").strip()
         if _gemini_fallback and _gemini_fallback != _gemini_model:
-            _chain.append(openai.LLM(
+            _chain.append(_GeminiCompatLLM(
                 model=_gemini_fallback, api_key=_gemini_key, base_url=_gemini_base, temperature=0.3,
             ))
             _labels.append(f"gemini:{_gemini_fallback}")
