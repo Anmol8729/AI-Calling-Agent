@@ -20,9 +20,6 @@ const Register = lazy(() => import("./pages/Register"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const AuthCallback = lazy(() => import("./pages/AuthCallback"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
-// The public marketing page. Code-split like every other page: it is the largest
-// single screen in the app, and nobody who is already signed in downloads it.
-const Landing = lazy(() => import("./pages/Landing"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Calls = lazy(() => import("./pages/Calls"));
 const Contacts = lazy(() => import("./pages/Contacts"));
@@ -48,15 +45,11 @@ ReactDOM.createRoot(document.getElementById("root")).render(
             {/* Google's redirect target. Must be public: the user has no app
                 session yet at this point, so it cannot sit behind ProtectedRoute. */}
             <Route path="/auth/callback" element={<AuthCallback />} />
-            {/* Public marketing page. An exact "/" outranks the "/*" splat below,
-                so this matches the root path only. Signed-in visitors are sent to the
-                dashboard instead: "/" is the URL existing customers have bookmarked,
-                and it took them to the dashboard before the landing page existed. */}
             <Route
               path="/"
               element={
-                <PublicOnlyRoute>
-                  <Landing />
+                <PublicOnlyRoute redirectTo="/dashboard">
+                  <Navigate to="/login" replace />
                 </PublicOnlyRoute>
               }
             />
