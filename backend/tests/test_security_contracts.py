@@ -1285,3 +1285,54 @@ class TestClientOwnedNumbersSecurityContracts:
         req = AgentContextRequest(did="+918045671200", trunk_id="ST_test123", call_id="call-1")
         assert req.trunk_id == "ST_test123"
 
+
+# --------------------------------------------------------------------------
+# Tenant Approval Gate
+# --------------------------------------------------------------------------
+class TestTenantApprovalSecurityContracts:
+    """Contracts for tenant status approval gate, audit tracking, and call gating."""
+
+    def test_tenant_model_has_status_column(self):
+        from backend.models import Tenant
+
+        columns = Tenant.__table__.c
+        assert "status" in columns
+        assert columns["status"].nullable is False
+        assert columns["status"].server_default is not None
+
+    def test_audit_event_tenant_status_changed_exists(self):
+        from backend.services import audit
+
+        assert hasattr(audit, "ADMIN_TENANT_STATUS_CHANGED")
+        assert audit.ADMIN_TENANT_STATUS_CHANGED == "admin.tenant_status_changed"
+
+    def test_admin_tenant_status_schema_and_route_exist(self):
+        from backend.routes.admin import TenantStatusUpdate, set_tenant_status
+
+        schema = TenantStatusUpdate(status="active")
+        assert schema.status == "active"
+        schema_suspended = TenantStatusUpdate(status="suspended")
+        assert schema_suspended.status == "suspended"
+        schema_pending = TenantStatusUpdate(status="pending")
+        assert schema_pending.status == "pending"
+        assert callable(set_tenant_status)
+
+    def test_auth_route_implements_pending_tenant_gate(self):
+        import inspect
+        from backend.routes import auth
+
+        source = inspect.getsource(auth.get_current_user)
+        assert "tenant_status" in source
+        assert "tenant_pending" in source
+        assert "tenant_suspended" in source
+        assert "/api/auth/me" in source
+
+    def test_agent_context_refuses_inactive_tenant_cleanly(self):
+        import inspect
+        from backend.routes import calls
+
+        source = inspect.getsource(calls.agent_context)
+        assert "tenant_inactive" in source
+        assert "tenant_status != \"active\"" in source
+        assert "quota_exceeded = True" in source
+

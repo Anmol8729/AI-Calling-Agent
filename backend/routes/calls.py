@@ -576,7 +576,14 @@ async def agent_context(
     # holds our secret and runs our code, so a cooperative flag is the right shape.
     # `is_over_monthly_quota` fails OPEN, so a counting error never blocks a call.
     quota_exceeded = False
-    if settings.ENFORCE_CALL_QUOTA:
+    tenant_status = (tenant.get("status") or "active").strip().lower()
+    if tenant_status != "active":
+        quota_exceeded = True
+        logger.warning(
+            f"agent-context: clinic {clinic_id} status is {tenant_status!r} — call {call_id} "
+            "will be answered with unavailable message and ended."
+        )
+    elif settings.ENFORCE_CALL_QUOTA:
         limit = effective_call_limit(tenant.get("subscription"), tenant.get("monthly_call_limit"))
         quota_exceeded = await repository.is_over_monthly_quota(clinic_id, limit)
         if quota_exceeded:
@@ -586,12 +593,18 @@ async def agent_context(
                 "will be answered with the quota message and ended."
             )
 
+    quota_msg = (
+        "Sorry, this service is currently unavailable. Please try again later."
+        if tenant_status != "active"
+        else (settings.QUOTA_EXCEEDED_MESSAGE if quota_exceeded else "")
+    )
+
     return api_response(success=True, message="ok", data={
         "clinic_id": clinic_id,
         "business_name": tenant.get("name") or "our business",
         "booking_mode": (tenant.get("booking_mode") or "time").strip().lower(),
-        "system_prompt": tenant.get("system_prompt") or "",
-        "knowledge_base": tenant.get("knowledge_base") or "",
+        "system_prompt": "" if tenant_status != "active" else (tenant.get("system_prompt") or ""),
+        "knowledge_base": "" if tenant_status != "active" else (tenant.get("knowledge_base") or ""),
         "voice": tenant.get("voice") or "",
         "language": tenant.get("language") or "",
         # Present this as `Authorization: Bearer <call_token>` on every other
@@ -600,8 +613,9 @@ async def agent_context(
         "call_token_expires_in_min": token_ttl_minutes(),
         "call_id": call_id,
         # True = say `quota_message` and hang up; do not run the assistant.
+        "tenant_inactive": tenant_status != "active",
         "quota_exceeded": quota_exceeded,
-        "quota_message": settings.QUOTA_EXCEEDED_MESSAGE if quota_exceeded else "",
+        "quota_message": quota_msg,
     })
 
 

@@ -54,6 +54,7 @@ TRUNK_UPDATED = "trunk.updated"
 
 ADMIN_PLAN_CHANGED = "admin.plan_changed"
 ADMIN_UPGRADE_REVIEWED = "admin.upgrade_request_reviewed"
+ADMIN_TENANT_STATUS_CHANGED = "admin.tenant_status_changed"
 
 BILLING_CHECKOUT = "billing.checkout_created"
 BILLING_PAYMENT_VERIFIED = "billing.payment_verified"

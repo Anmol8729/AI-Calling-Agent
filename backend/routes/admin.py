@@ -48,9 +48,11 @@ def _tenant_view(t: Tenant, used: int) -> dict:
         "name": t.name,
         "industry": t.industry,
         "subscription": t.subscription,
+        "status": getattr(t, "status", "active") or "active",
         "planName": plan["name"],
         "monthlyCallLimit": effective_call_limit(t.subscription, t.monthly_call_limit),
         "customAllowance": t.monthly_call_limit,
+        "numberLimit": getattr(t, "number_limit", None),
         "callsUsed": used,
         "createdAt": t.created_at.isoformat() if t.created_at else None,
     }
@@ -205,6 +207,62 @@ async def set_tenant_plan(
         request=request,
     )
     return api_response(success=True, message="Plan updated", data=_tenant_view(tenant, used))
+
+
+class TenantStatusUpdate(BaseModel):
+    status: str = Field(..., description="'active', 'pending', or 'suspended'")
+
+
+@router.put("/tenants/{tenant_id}/status")
+async def set_tenant_status(
+    tenant_id: str,
+    payload: TenantStatusUpdate,
+    request: Request,
+    current_user: dict = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    tid = to_uuid(tenant_id)
+    if tid is None:
+        return api_response(success=False, message="Invalid tenant id", status_code=400)
+
+    tenant = (await db.execute(select(Tenant).where(Tenant.id == tid))).scalar_one_or_none()
+    if tenant is None:
+        return api_response(success=False, message="Tenant not found", status_code=404)
+
+    new_status = (payload.status or "").strip().lower()
+    if new_status not in ("active", "pending", "suspended"):
+        return api_response(
+            success=False, message="Status must be 'active', 'pending', or 'suspended'", status_code=400
+        )
+
+    old_status = getattr(tenant, "status", "active") or "active"
+    tenant.status = new_status
+    await db.commit()
+    await db.refresh(tenant)
+
+    logger.info(
+        f"Super-admin {current_user.get('email')} updated tenant {tid} status: {old_status} -> {new_status}"
+    )
+    await audit.record(
+        audit.ADMIN_TENANT_STATUS_CHANGED,
+        actor=current_user,
+        clinic_id=tid,
+        target_type="tenant",
+        target_id=str(tid),
+        detail={
+            "old_status": old_status,
+            "new_status": new_status,
+            "tenant_name": tenant.name,
+        },
+        request=request,
+    )
+
+    return api_response(
+        success=True,
+        message=f"Tenant status updated to {new_status}",
+        data=_tenant_view(tenant, 0),
+    )
+
 
 
 # ----- Upgrade requests -----------------------------------------------------

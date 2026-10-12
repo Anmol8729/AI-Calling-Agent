@@ -50,6 +50,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
 async def get_current_user(
+    request: Request = None,
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ):
@@ -96,10 +97,46 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Check tenant lifecycle status (approval gate)
+    tenant_status = "active"
+    if user.clinic_id:
+        t_row = (await db.execute(select(Tenant.status).where(Tenant.id == user.clinic_id))).first()
+        if t_row and t_row[0]:
+            tenant_status = str(t_row[0]).strip().lower()
+
+    # Superadmins bypass tenant approval restrictions
+    if not is_superadmin(user.email):
+        path = request.url.path.rstrip("/") if (request and hasattr(request, "url")) else ""
+        allowed_pending_paths = {
+            "/api/auth/me",
+            "/api/auth/logout-all-devices",
+            "/api/auth/change-password",
+            "/api/auth/resend-verification",
+            "/api/auth/verify-email",
+        }
+        if tenant_status == "pending" and path not in allowed_pending_paths:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "tenant_pending",
+                    "message": "Your business account is pending approval by an administrator.",
+                },
+            )
+        elif tenant_status == "suspended":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "tenant_suspended",
+                    "message": "This business account has been suspended. Please contact support.",
+                },
+            )
+
     user_data = serialize_model(user)
     # Never let the hash travel with the request-scoped user, so a future handler
     # cannot leak it by returning `current_user` wholesale.
     user_data.pop("password_hash", None)
+    user_data["tenant_status"] = tenant_status
+    user_data["is_superadmin"] = is_superadmin(user.email)
     return user_data
 
 
@@ -210,9 +247,11 @@ async def register(request: Request, payload: UserRegister, db: AsyncSession = D
         # the chosen industry template (falls back to the generic defaults when
         # no/unknown industry is given). The client can edit these in Settings.
         tmpl = get_template(payload.industry)
+        initial_status = "active" if is_superadmin(payload.email) else "pending"
         tenant = Tenant(
             name=clinic_name,
             subscription="free",
+            status=initial_status,
             industry=(payload.industry.strip().lower() if tmpl else None),
             system_prompt=(tmpl["system_prompt"] if tmpl else None),
             initial_greeting=(tmpl["initial_greeting"] if tmpl else None),
@@ -257,6 +296,7 @@ async def register(request: Request, payload: UserRegister, db: AsyncSession = D
         "role": role,
         "name": payload.name,
         "clinic_id": clinic_id_str,
+        "tenant_status": initial_status if clinic_id else "active",
         "is_superadmin": is_superadmin(payload.email),
         # Always False right after signup — the confirmation email has only just
         # been sent. The dashboard uses this to show a "confirm your email" prompt.
@@ -386,9 +426,11 @@ async def google_sign_in(
             f"{identity.full_name or identity.email.split('@')[0]}'s Business"
         )
         tmpl = get_template(payload.industry)
+        initial_status = "active" if is_superadmin(identity.email) else "pending"
         tenant = Tenant(
             name=clinic_name,
             subscription="free",
+            status=initial_status,
             industry=(payload.industry.strip().lower() if tmpl else None),
             system_prompt=(tmpl["system_prompt"] if tmpl else None),
             initial_greeting=(tmpl["initial_greeting"] if tmpl else None),
@@ -454,6 +496,12 @@ async def google_sign_in(
     clinic_id_str = str(user.clinic_id) if user.clinic_id else None
     access_token = create_access_token(session_claims(user, clinic_id_str))
 
+    tenant_status = "active"
+    if user.clinic_id:
+        t = await db.get(Tenant, user.clinic_id)
+        if t and getattr(t, "status", None):
+            tenant_status = t.status
+
     await audit.record(
         audit.AUTH_LOGIN, actor_email=user.email, clinic_id=user.clinic_id,
         target_type="user", target_id=user.id,
@@ -474,6 +522,7 @@ async def google_sign_in(
             "name": user.name,
             "avatar_url": user.avatar_url,
             "clinic_id": clinic_id_str,
+            "tenant_status": tenant_status,
             "is_superadmin": is_superadmin(user.email),
             "email_verified": user.email_verified_at is not None,
             # Lets the dashboard send a first-time user through onboarding.
@@ -648,6 +697,12 @@ async def login(request: Request, payload: UserLogin, db: AsyncSession = Depends
     clinic_id_str = str(user.clinic_id) if user.clinic_id else None
     access_token = create_access_token(session_claims(user, clinic_id_str))
 
+    tenant_status = "active"
+    if user.clinic_id:
+        t = await db.get(Tenant, user.clinic_id)
+        if t and getattr(t, "status", None):
+            tenant_status = t.status
+
     response_data = {
         "access_token": access_token,
         "token_type": "bearer",
@@ -656,6 +711,7 @@ async def login(request: Request, payload: UserLogin, db: AsyncSession = Depends
         "role": user.role,
         "name": user.name,
         "clinic_id": clinic_id_str,
+        "tenant_status": tenant_status,
         "is_superadmin": is_superadmin(user.email),
         "email_verified": user.email_verified_at is not None,
     }
@@ -670,6 +726,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         "name": current_user["name"],
         "role": current_user["role"],
         "clinic_id": current_user.get("clinic_id"),
+        "tenant_status": current_user.get("tenant_status", "active"),
         "is_superadmin": is_superadmin(current_user["email"]),
         # Lets the dashboard prompt for confirmation. Login is not blocked on it,
         # but platform admin is (see require_superadmin).

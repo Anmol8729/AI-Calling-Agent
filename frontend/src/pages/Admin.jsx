@@ -31,6 +31,7 @@ export default function Admin() {
   const [selected, setSelected] = useState(null);
   const [planKey, setPlanKey] = useState("");
   const [allowance, setAllowance] = useState("");
+  const [selectedStatus, setSelectedStatus] = useState("active");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
 
@@ -86,6 +87,21 @@ export default function Admin() {
     }
   };
 
+  const updateStatus = async (id, newStatus) => {
+    setBanner(null);
+    try {
+      const res = await api.put(`/admin/tenants/${id}/status`, { status: newStatus });
+      if (res.data?.success) {
+        setBanner({ type: "success", text: `Tenant status updated to ${newStatus}.` });
+        load();
+      } else {
+        setBanner({ type: "error", text: res.data?.message || "Could not update status." });
+      }
+    } catch (err) {
+      setBanner({ type: "error", text: extractError(err) });
+    }
+  };
+
   useEffect(() => {
     load();
   }, [load]);
@@ -94,6 +110,7 @@ export default function Admin() {
     setFormError("");
     setPlanKey(row.subscription || "free");
     setAllowance(row.customAllowance ? String(row.customAllowance) : "");
+    setSelectedStatus(row.status || "active");
     setSelected(row);
   };
 
@@ -108,16 +125,21 @@ export default function Admin() {
       return;
     }
     try {
-      const res = await api.put(`/admin/tenants/${selected.id}/plan`, {
+      const planPromise = api.put(`/admin/tenants/${selected.id}/plan`, {
         subscription: planKey,
         monthly_call_limit: parsed,
       });
-      if (res.data?.success) {
+      const statusPromise = (selectedStatus !== selected.status)
+        ? api.put(`/admin/tenants/${selected.id}/status`, { status: selectedStatus })
+        : Promise.resolve({ data: { success: true } });
+
+      const [pRes, sRes] = await Promise.all([planPromise, statusPromise]);
+      if (pRes.data?.success && sRes.data?.success) {
         setBanner({ type: "success", text: `Updated ${selected.name}.` });
         setSelected(null);
         load();
       } else {
-        setFormError(res.data?.message || "Could not update plan.");
+        setFormError(pRes.data?.message || sRes.data?.message || "Could not update client.");
       }
     } catch (err) {
       setFormError(extractError(err));
@@ -129,6 +151,15 @@ export default function Admin() {
   const columns = [
     { key: "name", header: "Business" },
     { key: "industry", header: "Industry", render: (r) => r.industry || "—" },
+    {
+      key: "status",
+      header: "Status",
+      render: (r) => {
+        const s = r.status || "active";
+        const tone = s === "active" ? "success" : s === "pending" ? "warning" : "danger";
+        return <Badge tone={tone}>{s}</Badge>;
+      },
+    },
     { key: "planName", header: "Plan", render: (r) => <Badge tone="neutral">{r.planName}</Badge> },
     {
       key: "monthlyCallLimit",
@@ -196,6 +227,32 @@ export default function Admin() {
         )}
       </section>
 
+      {!error && tenants.some((t) => t.status === "pending") && (
+        <section className="panel rounded-3xl p-5 border border-amber-200 bg-amber-50/40">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-amber-600" />
+            <h2 className="text-lg font-semibold text-gray-950">Pending tenant approvals</h2>
+          </div>
+          <p className="mt-1 text-sm text-gray-500">New signups awaiting verification before their agents can receive or make calls.</p>
+          <div className="mt-4 space-y-3">
+            {tenants.filter((t) => t.status === "pending").map((t) => (
+              <div key={t.id} className="flex flex-col gap-3 rounded-2xl border border-amber-100 bg-white p-4 sm:flex-row sm:items-center sm:justify-between shadow-xs">
+                <div>
+                  <p className="text-sm font-semibold text-gray-950">{t.name}</p>
+                  <p className="text-xs text-gray-500">
+                    Industry: {t.industry || "General"} · Joined {t.createdAt ? new Date(t.createdAt).toLocaleDateString() : "recently"}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={() => updateStatus(t.id, "active")}>Approve</Button>
+                  <Button variant="secondary" size="sm" onClick={() => updateStatus(t.id, "suspended")}>Suspend</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {!error && requests.some((r) => r.status === "pending") && (
         <section className="panel rounded-3xl p-5">
           <h2 className="text-lg font-semibold text-gray-950">Pending upgrade requests</h2>
@@ -232,8 +289,8 @@ export default function Admin() {
       <Modal
         open={!!selected}
         onClose={() => setSelected(null)}
-        title={selected ? `Edit plan — ${selected.name}` : "Edit plan"}
-        description="Set the subscription plan, and optionally a custom monthly call allowance."
+        title={selected ? `Edit client — ${selected.name}` : "Edit client"}
+        description="Set the subscription plan, monthly call allowance, and account status."
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="secondary" onClick={() => setSelected(null)}>Cancel</Button>
@@ -245,6 +302,18 @@ export default function Admin() {
           <div className="mb-4 rounded-2xl border border-red-100 bg-red-50 p-3 text-sm text-red-800">{formError}</div>
         )}
         <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">Status</label>
+            <select
+              className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value)}
+            >
+              <option value="active">Active</option>
+              <option value="pending">Pending</option>
+              <option value="suspended">Suspended</option>
+            </select>
+          </div>
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">Plan</label>
             <select

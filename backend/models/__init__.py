@@ -66,6 +66,15 @@ class Tenant(Base):
     id = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = mapped_column(String(255), nullable=False)
     subscription = mapped_column(String(50), nullable=False, default="free")
+    # Lifecycle: "pending" (awaiting admin approval), "active" (approved), "suspended".
+    # Existing rows default to "active" so live businesses are never locked out.
+    status = mapped_column(
+        String(20),
+        nullable=False,
+        default="active",
+        server_default=text("'active'"),
+        index=True,
+    )
     # How this tenant books: "time" (fixed time slots) or "token" (daily queue
     # number â€” common for Indian doctor clinics).
     booking_mode = mapped_column(String(20), nullable=False, default="time")
