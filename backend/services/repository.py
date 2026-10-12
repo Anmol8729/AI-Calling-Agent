@@ -17,7 +17,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from backend.services.db import get_sessionmaker
 from backend.services import events
-from backend.models import Tenant, Patient, Appointment, CallLog, PhoneNumber, WhatsAppMessage
+from backend.models import (
+    Tenant, Patient, Appointment, CallLog, PhoneNumber, SipTrunk, WhatsAppMessage,
+)
 from backend.utils.helpers import serialize_model, to_uuid
 
 logger = logging.getLogger("repository")
@@ -26,13 +28,37 @@ logger = logging.getLogger("repository")
 # ----- Tenant lookups -------------------------------------------------------
 
 async def get_tenant_by_did(did: str):
+    """Resolve a tenant from a dialed number, for calls arriving on the SHARED trunk.
+
+    This is the legacy path: one Vobiz trunk carrying numbers Clarivo itself
+    subscribed to. Numbers a customer brought from their own operator arrive on their
+    own trunk instead and are resolved by `resolve_trunk_call`, which can additionally
+    prove the number belongs to them.
+
+    Two gates that were not here before:
+
+      * `verification_status == "verified"`. A number nobody has proved must not
+        answer real calls; otherwise the first account to type in a competitor's
+        number would receive that competitor's calls. Numbers that predate
+        verification were backfilled as verified by migration f766bbd4df0d, so this
+        does not strand any existing tenant.
+      * The legacy `tenants.did` fallback now only applies to tenants with NO rows in
+        `phone_numbers`. That column has no status and no verification, so it was an
+        ungated way into a tenant; restricting it to tenants that never migrated keeps
+        it working for them without letting it override, or resurrect, a managed
+        number that has been deactivated or removed.
+    """
     Session = get_sessionmaker()
     if Session is None or not did:
         return None
     async with Session() as session:
-        # Prefer the managed phone_numbers table (active connected numbers).
+        # Prefer the managed phone_numbers table (active, proven numbers).
         pn = (await session.execute(
-            select(PhoneNumber).where(PhoneNumber.number == did, PhoneNumber.status == "active")
+            select(PhoneNumber).where(
+                PhoneNumber.number == did,
+                PhoneNumber.status == "active",
+                PhoneNumber.verification_status == "verified",
+            )
         )).scalar_one_or_none()
         if pn is not None:
             tenant = (await session.execute(
@@ -40,9 +66,155 @@ async def get_tenant_by_did(did: str):
             )).scalar_one_or_none()
             if tenant is not None:
                 return serialize_model(tenant)
-        # Fallback: the legacy single DID stored directly on the tenant.
-        result = await session.execute(select(Tenant).where(Tenant.did == did))
-        return serialize_model(result.scalar_one_or_none())
+
+        # Fallback: the legacy single DID stored directly on the tenant, and only for
+        # a tenant that has never used the managed table.
+        tenant = (await session.execute(
+            select(Tenant).where(Tenant.did == did)
+        )).scalar_one_or_none()
+        if tenant is None:
+            return None
+        managed = (await session.execute(
+            select(func.count()).select_from(PhoneNumber).where(
+                PhoneNumber.clinic_id == tenant.id
+            )
+        )).scalar() or 0
+        if managed:
+            logger.warning(
+                "Ignoring legacy tenants.did match for clinic %s: it has %d managed "
+                "phone number(s), so the dialed number %r is either deactivated or "
+                "removed and must not be resolved through the legacy column.",
+                tenant.id, managed, did,
+            )
+            return None
+        return serialize_model(tenant)
+
+
+async def resolve_trunk_call(trunk_id: str, did_variants: list):
+    """Resolve a call that arrived on a tenant's OWN SIP trunk.
+
+    This is where a customer-owned number is both authenticated and proven. The trunk
+    identifies the tenant, because its digest credentials are generated per tenant and
+    shown only in that tenant's dashboard. The dialed number then has to be one THAT
+    tenant has claimed — the trunk says who is calling in, the number says who they are
+    entitled to be answered as, and both must agree.
+
+    Returns a dict with `outcome`:
+
+      ok              - resolved; `tenant` is set, `verified_now` says whether this
+                        call is what proved the number
+      unknown_trunk   - no sip_trunks row for this LiveKit trunk id
+      number_not_found- authenticated, but the dialed number is not claimed by them
+      wrong_tenant    - the number belongs to a DIFFERENT clinic. The one outcome that
+                        should be read as a possible attack rather than a mistake:
+                        someone with tenant A's credentials is presenting tenant B's
+                        number. `owner_clinic_id` is included so it can be audited.
+      number_inactive - claimed by them, but they have switched it off
+
+    Deliberately does NOT fall back to `get_only_tenant()`. On a single-tenant staging
+    database that fallback would answer a misdirected or forged call as the only clinic
+    present, which is exactly the confusion this function exists to prevent.
+    """
+    Session = get_sessionmaker()
+    tid = (trunk_id or "").strip()
+    if Session is None or not tid:
+        return {"outcome": "unknown_trunk", "tenant": None, "verified_now": False}
+
+    async with Session() as session:
+        trunk = (await session.execute(
+            select(SipTrunk).where(SipTrunk.livekit_trunk_id == tid)
+        )).scalar_one_or_none()
+        if trunk is None:
+            return {"outcome": "unknown_trunk", "tenant": None, "verified_now": False}
+
+        pn = None
+        for cand in (did_variants or []):
+            if not cand:
+                continue
+            pn = (await session.execute(
+                select(PhoneNumber).where(PhoneNumber.number == cand)
+            )).scalar_one_or_none()
+            if pn is not None:
+                break
+
+        if pn is None:
+            return {
+                "outcome": "number_not_found", "tenant": None, "verified_now": False,
+                "clinic_id": str(trunk.clinic_id),
+            }
+
+        if pn.clinic_id != trunk.clinic_id:
+            return {
+                "outcome": "wrong_tenant", "tenant": None, "verified_now": False,
+                "clinic_id": str(trunk.clinic_id),
+                "owner_clinic_id": str(pn.clinic_id),
+                "number": pn.number,
+            }
+
+        if pn.status != "active":
+            return {
+                "outcome": "number_inactive", "tenant": None, "verified_now": False,
+                "clinic_id": str(trunk.clinic_id), "number": pn.number,
+            }
+
+        # The proof. Reaching this line means a call authenticated with this tenant's
+        # own credentials asked for a number this tenant has claimed, which is exactly
+        # the thing an SMS OTP would have been standing in for.
+        verified_now = False
+        if pn.verification_status != "verified":
+            pn.verification_status = "verified"
+            pn.verified_at = datetime.utcnow()
+            await session.commit()
+            verified_now = True
+            logger.info(
+                "Verified %s for clinic %s via an authenticated call on trunk %s",
+                pn.number, pn.clinic_id, tid,
+            )
+
+        tenant = (await session.execute(
+            select(Tenant).where(Tenant.id == trunk.clinic_id)
+        )).scalar_one_or_none()
+        if tenant is None:
+            # The trunk's FK is ON DELETE CASCADE, so this should be unreachable.
+            return {"outcome": "unknown_trunk", "tenant": None, "verified_now": False}
+
+        return {
+            "outcome": "ok",
+            "tenant": serialize_model(tenant),
+            "verified_now": verified_now,
+            "number": pn.number,
+            "number_id": str(pn.id),
+        }
+
+
+async def find_number_state(did_variants: list):
+    """Why a dialed number failed to resolve. Diagnostics only, never routing.
+
+    "No clinic for DID +91…" is the same log line whether the number was never
+    registered, is registered but unproven, or was switched off, and those need three
+    different fixes. This distinguishes them without widening what is allowed to answer
+    a call.
+    """
+    Session = get_sessionmaker()
+    if Session is None:
+        return {"exists": False}
+    async with Session() as session:
+        for cand in (did_variants or []):
+            if not cand:
+                continue
+            pn = (await session.execute(
+                select(PhoneNumber).where(PhoneNumber.number == cand)
+            )).scalar_one_or_none()
+            if pn is not None:
+                return {
+                    "exists": True,
+                    "number": pn.number,
+                    "status": pn.status,
+                    "verification_status": pn.verification_status,
+                    "source": pn.source,
+                    "clinic_id": str(pn.clinic_id),
+                }
+    return {"exists": False}
 
 
 async def get_tenant_by_id(clinic_id):

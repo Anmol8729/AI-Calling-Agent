@@ -149,10 +149,99 @@ class Settings(BaseSettings):
     # serves every number, so this is a single one-time value.
     VOBIZ_TRUNK_GROUP_ID: str = os.getenv("VOBIZ_TRUNK_GROUP_ID", "")
 
+    # ----- who may be the subscriber of a phone number -----------------------
+    # OFF by default, deliberately.
+    #
+    # "Platform numbers" means Clarivo claims a DID from its OWN Vobiz account and
+    # hands it to a customer (POST /api/phone-numbers/provision). That makes Clarivo
+    # the subscriber of record for a number a third party actually uses, which is a
+    # licensing/KYC question we are not in a position to answer for ourselves — the
+    # CAF is signed by us, not by the business whose calls arrive on it.
+    #
+    # The supported model is the reverse: the customer holds the number with their
+    # own operator and forwards it to the per-tenant SIP trunk we create for them
+    # (services/livekit_sip.py). They sign their own CAF; we are the software layer.
+    #
+    # Leave this false unless a telecom lawyer AND the operator have confirmed in
+    # writing that sub-allocating our numbers is permitted (e.g. under a signed
+    # channel-partner agreement). See docs/PLAN-number-ownership.md.
+    ALLOW_PLATFORM_NUMBERS: bool = os.getenv("ALLOW_PLATFORM_NUMBERS", "false").lower() == "true"
+
     @property
     def number_provisioning_enabled(self) -> bool:
-        """True when the dashboard can claim + route numbers by itself."""
-        return bool(self.VOBIZ_AUTH_ID and self.VOBIZ_AUTH_TOKEN and self.VOBIZ_TRUNK_GROUP_ID)
+        """True when the dashboard can claim + route numbers from OUR inventory.
+
+        The credentials check is no longer sufficient on its own: having working
+        Vobiz keys says we *can* claim a number, not that we *may*. ALLOW_PLATFORM_NUMBERS
+        is the permission, so removing the keys is not the only way to switch this
+        off — and switching it off does not disable the product, because bring-your-own
+        numbers are a separate path.
+        """
+        return bool(
+            self.ALLOW_PLATFORM_NUMBERS
+            and self.VOBIZ_AUTH_ID
+            and self.VOBIZ_AUTH_TOKEN
+            and self.VOBIZ_TRUNK_GROUP_ID
+        )
+
+    # ----- LiveKit server API (per-tenant SIP inbound trunks) ----------------
+    # These were previously agent-only: the voice agent picks them up from the
+    # environment through the LiveKit SDK and the backend never held them. The
+    # backend needs them now because a SIP inbound trunk stopped being a single
+    # hand-made object in the LiveKit console and became a per-customer resource —
+    # each tenant gets its own trunk, with its own digest credentials, so their
+    # operator can forward calls in without us subscribing to their number.
+    #
+    # Same key/secret as the agent uses. Optional on purpose: when unset the
+    # dashboard still records numbers and shows the tenant what is pending, it just
+    # cannot create the trunk itself (see livekit_sip.enabled). check_production_config()
+    # deliberately does NOT treat these as fatal — a missing trunk degrades one
+    # feature, and refusing to boot the whole API over it would be worse.
+    LIVEKIT_URL: str = os.getenv("LIVEKIT_URL", "")
+    LIVEKIT_API_KEY: str = os.getenv("LIVEKIT_API_KEY", "")
+    LIVEKIT_API_SECRET: str = os.getenv("LIVEKIT_API_SECRET", "")
+    # Host the customer's operator sends SIP to. On LiveKit Cloud it is derived
+    # from LIVEKIT_URL (see livekit_sip_host), so this only needs setting for a
+    # self-hosted deployment, where the SIP service host is arbitrary.
+    LIVEKIT_SIP_HOST: str = os.getenv("LIVEKIT_SIP_HOST", "")
+    # Must match `agent_name` on the running worker (agent/main.py WorkerOptions,
+    # env AGENT_NAME). Every dispatch rule we create names it, and a mismatch means
+    # LiveKit has nothing to hand the call to and the caller hears nothing.
+    LIVEKIT_AGENT_NAME: str = os.getenv("AGENT_NAME", "clarivo-inbound")
+
+    @property
+    def livekit_sip_enabled(self) -> bool:
+        """True when the backend can create/modify SIP trunks by itself."""
+        return bool(self.LIVEKIT_URL and self.LIVEKIT_API_KEY and self.LIVEKIT_API_SECRET)
+
+    @property
+    def livekit_sip_host(self) -> str:
+        """Hostname the tenant's operator points its trunk at.
+
+        LiveKit Cloud exposes SIP on a sibling of the project host:
+        `wss://foo-abc123.livekit.cloud` -> `foo-abc123.sip.livekit.cloud`. That
+        mapping does not hold for self-hosted installs, so an explicit
+        LIVEKIT_SIP_HOST always wins and "" is returned rather than a guess when
+        the URL is not a Cloud one — showing a customer a hostname that does not
+        answer is worse than showing none.
+        """
+        explicit = (self.LIVEKIT_SIP_HOST or "").strip()
+        if explicit:
+            return explicit
+        url = (self.LIVEKIT_URL or "").strip()
+        if not url:
+            return ""
+        for scheme in ("wss://", "ws://", "https://", "http://"):
+            if url.startswith(scheme):
+                url = url[len(scheme):]
+                break
+        host = url.split("/", 1)[0].split(":", 1)[0].strip().lower()
+        if not host.endswith(".livekit.cloud"):
+            return ""
+        subdomain, _, base = host.partition(".")
+        if not subdomain or not base:
+            return ""
+        return f"{subdomain}.sip.{base}"
 
     # ----- stale call cleanup ------------------------------------------------
     # A call still marked "active" this long after it started is assumed dead: the

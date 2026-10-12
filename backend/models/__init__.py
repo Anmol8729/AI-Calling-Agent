@@ -76,11 +76,15 @@ class Tenant(Base):
     # int), it wins over the subscription plan's default allowance â€” used for
     # custom/enterprise deals. See services/plans.py.
     monthly_call_limit = mapped_column(Integer, nullable=True)
-    # Per-tenant override for how many phone numbers this client may claim. Same
+    # Per-tenant override for how many phone numbers this client may connect. Same
     # pattern as monthly_call_limit: set it to agree a larger allowance for one
-    # customer without inventing a new plan. This is a SPEND cap â€” every DID costs
-    # roughly â‚¹100 setup plus â‚¹500/month â€” so leaving it None applies the plan's
-    # included_numbers. See services/plans.py.
+    # customer without inventing a new plan. Leaving it None applies the plan's
+    # included_numbers.
+    #
+    # No longer a spend cap. It was one while Clarivo subscribed to the DIDs itself
+    # (~₹100 setup plus ₹500/month each); customers now hold their own numbers with
+    # their own operator, so this limits a feature rather than a bill and can be raised
+    # freely. See services/plans.py.
     number_limit = mapped_column(Integer, nullable=True)
     # Vertical this tenant operates in (clinic, real_estate, restaurant, ...).
     # Drives the starter template picked at sign-up; see services/industry_templates.py.
@@ -388,6 +392,27 @@ class PasswordResetToken(Base):
 
 
 class PhoneNumber(Base):
+    """A phone number that reaches this tenant's assistant.
+
+    Two columns describe two different things and both are needed to route a call:
+
+      * `status` is the CUSTOMER'S intent — "I want this line answered" — and is what
+        the dashboard's Activate/Deactivate button writes.
+      * `verification_status` is OUR evidence that the number really belongs to them.
+
+    Keeping them apart matters because they can disagree in both directions: a
+    verified number can be deliberately paused, and a brand-new number is switched
+    on by its owner long before we have proof. Collapsing them into one field meant
+    the only honest default was "active", which is how an unverified number could
+    start taking calls the moment somebody typed it in.
+
+    On why proof is needed at all: a number is claimable exactly once platform-wide,
+    so without proof the first account to type a competitor's number would capture
+    that competitor's calls. Verification is described on SipTrunk below — it falls
+    out of the trunk design rather than needing an SMS or OTP provider, which is
+    fortunate, because this codebase has neither.
+    """
+
     __tablename__ = "phone_numbers"
 
     id = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -400,7 +425,131 @@ class PhoneNumber(Base):
     number = mapped_column(String(32), nullable=False, unique=True)
     label = mapped_column(String(100), nullable=True)
     status = mapped_column(String(20), nullable=False, default="active")  # active | inactive
+    # Who the subscriber of record is:
+    #   bring_your_own       - the customer holds it with their own operator and
+    #                          forwards it to us. The supported model: they sign
+    #                          their own CAF/KYC and we are only the software layer.
+    #   platform_provisioned - legacy. Clarivo claimed it from its own Vobiz account
+    #                          and handed it over, which put OUR name on the CAF for
+    #                          a line somebody else uses. Gated off behind
+    #                          settings.ALLOW_PLATFORM_NUMBERS; see
+    #                          docs/PLAN-number-ownership.md.
+    # Until this column existed the distinction survived only in an audit-log detail
+    # blob, so the database could not answer "which numbers are we the subscriber of?"
+    # — the first question anyone reviewing the licensing position asks.
+    # server_default as well as default: migrations/env.py runs with
+    # compare_server_default=True, so a default that exists only in Python would show
+    # up forever as pending drift in `alembic check`. It also means a hand-written
+    # INSERT gets a sane value instead of failing the NOT NULL.
+    source = mapped_column(
+        String(30), nullable=False, default="bring_your_own",
+        server_default="bring_your_own",
+    )
+    # pending | verified. No "failed" state: a failed attempt is simply one that has
+    # not happened yet, and a stored failure would need expiring to avoid stranding a
+    # customer who fixed their operator config an hour later.
+    verification_status = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending",
+    )
+    # When the first authenticated call proved ownership. NULL means never.
+    verified_at = mapped_column(DateTime, nullable=True)
+    # The customer's telephony operator, e.g. "Airtel", "Tata Tele", "Exotel".
+    # Informational only — nothing branches on it. It exists because support's first
+    # question on a routing problem is "who is your provider?", and because it is the
+    # written record that the number belongs to their account, not ours.
+    provider = mapped_column(String(60), nullable=True)
     created_at = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class SipTrunk(Base):
+    """The per-tenant SIP entry point a customer's operator forwards calls into.
+
+    ONE row per clinic. It exists because the trunk stopped being infrastructure and
+    became a customer-facing resource.
+
+    Before this, a single LiveKit inbound trunk — created by hand in the LiveKit
+    console — served every tenant, and the only thing distinguishing one caller's
+    business from another's was the dialed number. That works when we own every
+    number. It does not work when customers bring their own, for two reasons:
+
+      1. **Nothing to authenticate.** A shared trunk has one set of credentials, so
+         any party who obtained them could present any number and be answered as
+         that tenant.
+      2. **Nothing to prove ownership with.** We would be taking the customer's word
+         that the number is theirs.
+
+    Giving each tenant its own trunk solves both at once, and the second one for
+    free. The digest credentials below are generated by us and displayed in exactly
+    one place: that tenant's own dashboard. So when a call arrives authenticated with
+    them, whoever configured the forwarding for the dialed number is necessarily the
+    party holding this tenant's secret. That IS the ownership proof — which is why
+    `PhoneNumber.verification_status` can be satisfied by the customer's first test
+    call instead of by an SMS OTP we have no provider for.
+
+    The matching guard lives in the resolution path: a call arriving on this trunk
+    for a number belonging to a DIFFERENT clinic is rejected rather than answered.
+    Without that, per-tenant credentials would authenticate the tenant but still let
+    them claim anyone's number.
+
+    A row can exist before the LiveKit trunk does (`status="pending"`) — see the
+    column comment. That is deliberate: the dashboard must be able to tell a customer
+    "we are still setting this up" instead of failing their request outright.
+    """
+
+    __tablename__ = "sip_trunks"
+
+    id = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # UNIQUE, not just indexed: one trunk per clinic is the invariant the whole
+    # design rests on. A second row would silently split a tenant's numbers across
+    # two trunks with two different passwords.
+    clinic_id = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    # LiveKit's own ids (ST_… and SDR_…). NULL while status="pending".
+    livekit_trunk_id = mapped_column(String(64), nullable=True, unique=True)
+    livekit_dispatch_rule_id = mapped_column(String(64), nullable=True)
+    # Digest credentials the customer gives their operator. Generated here, never
+    # chosen by the customer, and rotatable from the dashboard.
+    #
+    # Stored in plaintext, matching tenants.whatsapp_access_token. That is a real
+    # tradeoff, so the reasoning: this authenticates INBOUND calls only, so unlike a
+    # leaked outbound SIP password it cannot be used to place calls at our expense.
+    # The worst case is forged calls INTO one tenant's assistant — quota and LLM
+    # spend, and junk appointments — which is why `allowed_addresses` and the rotate
+    # endpoint exist. Encrypting it would mean introducing a key to manage and lose,
+    # for a codebase that currently has no encryption-at-rest anywhere; that is worth
+    # doing as a deliberate piece of work, not as a side effect of this change.
+    auth_username = mapped_column(String(64), nullable=False)
+    auth_password = mapped_column(String(128), nullable=False)
+    # Host the operator points at, captured at creation time rather than derived on
+    # read: if LIVEKIT_URL or LIVEKIT_SIP_HOST is ever changed we still know what we
+    # told this customer to configure, which is the difference between diagnosing a
+    # broken trunk and guessing about it.
+    sip_host = mapped_column(String(255), nullable=True)
+    # Optional comma-separated IP/CIDR allowlist for the operator's signalling
+    # addresses, passed straight through to the trunk. This is the control that turns
+    # the credentials from "a shared secret" into "a shared secret usable from two
+    # known hosts". Left NULL by default because a wrong value breaks every call for
+    # that tenant, and most customers do not know their operator's signalling IPs.
+    allowed_addresses = mapped_column(Text, nullable=True)
+    # pending  - row exists, LiveKit trunk does not (credentials not yet usable).
+    #            Happens when LIVEKIT_* is unconfigured or LiveKit rejected the call.
+    # active   - trunk exists and is accepting calls.
+    status = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending",
+    )
+    # Why the last sync failed, shown to the tenant instead of a bare "pending".
+    # Cleared on success. Never holds credentials.
+    last_error = mapped_column(Text, nullable=True)
+    # Last time the trunk's number list was successfully pushed to LiveKit. Lets a
+    # drifted trunk be spotted without calling out to LiveKit on every page load.
+    synced_at = mapped_column(DateTime, nullable=True)
+    created_at = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 class UpgradeRequest(Base):
@@ -484,6 +633,6 @@ class DemoRequest(Base):
 
 __all__ = [
     "Base", "Tenant", "User", "Patient", "Appointment", "CallLog",
-    "PasswordResetToken", "PhoneNumber", "UpgradeRequest", "Payment",
+    "PasswordResetToken", "PhoneNumber", "SipTrunk", "UpgradeRequest", "Payment",
     "WhatsAppMessage", "DemoRequest",
 ]

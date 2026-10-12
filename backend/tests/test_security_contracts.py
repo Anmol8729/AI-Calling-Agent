@@ -1235,3 +1235,53 @@ class TestCallQuotaEnforcement:
         # The refusal session gets TTS only — no stt=, no llm=.
         assert "AgentSession(tts=tts_engine)" in block
         assert "stt=" not in block and "llm=" not in block
+
+
+# --------------------------------------------------------------------------
+# Client-owned numbers & per-tenant SIP trunks
+# --------------------------------------------------------------------------
+class TestClientOwnedNumbersSecurityContracts:
+    """Contracts for per-tenant SIP trunks and number verification."""
+
+    def test_phone_number_provenance_columns_exist(self):
+        from backend.models import PhoneNumber
+
+        columns = PhoneNumber.__table__.c
+        assert "source" in columns
+        assert "verification_status" in columns
+        assert "verified_at" in columns
+        assert "provider" in columns
+        assert columns["source"].nullable is False
+        assert columns["verification_status"].nullable is False
+
+    def test_sip_trunk_model_exists_and_enforces_one_per_clinic(self):
+        from backend.models import SipTrunk
+
+        columns = SipTrunk.__table__.c
+        assert "clinic_id" in columns
+        assert "auth_username" in columns
+        assert "auth_password" in columns
+        assert "livekit_trunk_id" in columns
+        assert columns["clinic_id"].unique is True
+
+    def test_credentials_generator_creates_strong_credentials(self):
+        from backend.services.livekit_sip import generate_credentials
+
+        username, password = generate_credentials()
+        assert username.startswith("clv_")
+        assert len(username) >= 15
+        assert len(password) == 32
+        # Characters should be alphanumeric
+        assert password.isalnum()
+
+    def test_platform_number_provisioning_is_disabled_by_default(self):
+        from backend.config.settings import settings
+
+        assert settings.ALLOW_PLATFORM_NUMBERS is False
+
+    def test_agent_context_request_schema_supports_trunk_id(self):
+        from backend.routes.calls import AgentContextRequest
+
+        req = AgentContextRequest(did="+918045671200", trunk_id="ST_test123", call_id="call-1")
+        assert req.trunk_id == "ST_test123"
+

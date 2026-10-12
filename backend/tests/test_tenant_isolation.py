@@ -63,7 +63,13 @@ def api():
 
 
 async def _purge(emails):
-    """Delete probe accounts and everything hanging off them."""
+    """Delete probe accounts and everything hanging off them.
+
+    Includes the LiveKit SIP trunk. Connecting a phone number now creates a real trunk
+    and dispatch rule in the LiveKit project, and those do NOT go away when the database
+    row does — deleting the `sip_trunks` row just loses the id needed to clean up. Before
+    this, every run of these tests left a trunk behind named after the probe clinic.
+    """
     from sqlalchemy import delete, select
 
     from backend.models import (
@@ -73,9 +79,11 @@ async def _purge(emails):
         PasswordResetToken,
         Patient,
         PhoneNumber,
+        SipTrunk,
         Tenant,
         User,
     )
+    from backend.services import livekit_sip
     from backend.services.db import close_db_connection, connect_to_db, get_sessionmaker
 
     await connect_to_db()
@@ -94,7 +102,16 @@ async def _purge(emails):
             await session.execute(delete(AuditLog).where(AuditLog.actor_user_id == user.id))
             await session.execute(delete(User).where(User.id == user.id))
             if clinic_id:
-                for model in (AuditLog, CallLog, Appointment, Patient, PhoneNumber):
+                # Release the LiveKit objects BEFORE dropping the row that identifies them.
+                trunk = (await session.execute(
+                    select(SipTrunk).where(SipTrunk.clinic_id == clinic_id)
+                )).scalar_one_or_none()
+                if trunk is not None and (trunk.livekit_trunk_id or trunk.livekit_dispatch_rule_id):
+                    await livekit_sip.delete_trunk(
+                        trunk_id=trunk.livekit_trunk_id or "",
+                        dispatch_rule_id=trunk.livekit_dispatch_rule_id or "",
+                    )
+                for model in (AuditLog, CallLog, Appointment, Patient, PhoneNumber, SipTrunk):
                     await session.execute(delete(model).where(model.clinic_id == clinic_id))
                 await session.execute(delete(Tenant).where(Tenant.id == clinic_id))
         await session.execute(delete(AuditLog).where(AuditLog.actor_email.in_(list(emails))))
@@ -257,12 +274,34 @@ class TestPhoneNumberOwnership:
             )
 
     def test_b_cannot_delete_as_number(self, api, two_tenants):
+        """Clinic B must not be able to delete a number clinic A holds.
+
+        Takes whatever number clinic A already has and only creates one if it has
+        none. It used to always create, which stopped working for two reasons at once
+        when `POST /phone-numbers/` was brought in line with the rest of the model:
+
+          * The endpoint became plan-capped. The previous test in this class already
+            consumes clinic A's single included number, so the create failed and the
+            `pytest.skip` here swallowed it — this cross-tenant check silently stopped
+            running on every invocation rather than failing loudly.
+          * The response is now `{"number": ..., "connection": ...}`, because adding a
+            number also reports the state of the tenant's SIP connection. Reading
+            `data["id"]` would no longer find the id.
+
+        Reusing an existing number also makes this independent of test order, which is
+        what allowed the coupling to go unnoticed.
+        """
         a, b = two_tenants
-        created = api.post("/api/phone-numbers/", headers=a.headers,
-                           json={"number": "+919000000202"})
-        if created.status_code != 200:
-            pytest.skip("clinic A is already at its plan number limit")
-        number_id = created.json()["data"]["id"]
+        existing = api.get("/api/phone-numbers/", headers=a.headers)
+        assert existing.status_code == 200, existing.text
+        rows = existing.json()["data"] or []
+        if rows:
+            number_id = rows[0]["id"]
+        else:
+            created = api.post("/api/phone-numbers/", headers=a.headers,
+                               json={"number": "+919000000202"})
+            assert created.status_code == 200, created.text
+            number_id = created.json()["data"]["number"]["id"]
         removed = api.delete(f"/api/phone-numbers/{number_id}", headers=b.headers)
         assert removed.status_code in (403, 404), removed.text
 

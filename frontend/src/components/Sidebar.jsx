@@ -63,7 +63,13 @@ export default function Sidebar({ open, onClose }) {
     };
   }, []);
   const totalNumbers = (numbers || []).length;
-  const activeNumbers = (numbers || []).filter((n) => n.status === "active").length;
+  // "Active" here has to mean "actually able to answer a call", so it needs BOTH the
+  // customer having it switched on and us having proved the number is theirs. Counting
+  // status alone would show a number as active while it was still waiting for its first
+  // verifying call and silently rejecting traffic.
+  const activeNumbers = (numbers || []).filter(
+    (n) => n.status === "active" && n.verification_status === "verified"
+  ).length;
 
   // Nav labels that adapt to the tenant's industry.
   const labelOverrides = { "/contacts": labels.contacts, "/appointments": labels.bookings };

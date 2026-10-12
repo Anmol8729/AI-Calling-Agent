@@ -1,105 +1,130 @@
-# Clarivo - Multi-Tenant AI Medical Receptionist SaaS 📞🩺
+# Clarivo — Multi-Tenant AI Voice Receptionist SaaS 📞🩺
 
-Clarivo is a production-ready, multi-tenant conversational voice agent SaaS designed specifically for medical practices, clinics, hospitals, dentists, and labs. By leveraging advanced Large Language Models (LLMs), Voice Activity Detection (VAD), and low-latency VoIP integrations, Clarivo handles incoming patient calls, schedules appointments, logs patient interactions directly into a CRM, sends pill reminders, and redirects calls to human staff when necessary.
+Clarivo is a production-ready, multi-tenant conversational voice AI receptionist SaaS designed specifically for medical practices, clinics, dental offices, labs, and service businesses (real estate, salons, hospitality).
+
+Clarivo handles incoming telephone calls via low-latency SIP trunking and WebRTC, converses in natural Hindi and English, identifies returning callers, manages patient intake (name, age, reason for visit), checks live appointment availability or daily queue tokens, books appointments directly into the clinic's CRM, and sends instant automated WhatsApp notifications.
 
 ---
 
 ## 🚀 Key Features
 
-*   **Multi-Tenant Architecture**: Isolate clinic configurations, patient CRMs, appointment books, call histories, and prompts per tenant.
-*   **Indian Telephony Integration (Vobiz)**: Native integration with Vobiz SIP Trunking and Programmable Voice API for highly cost-effective calling.
-*   **Low-Latency AI Pipeline**: Converts incoming 16-bit linear PCM (`audio/x-l16`) speech stream to text via a customized MiniMax ASR/STT wrapper, processes conversation context using MiniMax LLM, and streams voice replies back via MiniMax TTS.
-*   **Role-Based Access Control (RBAC)**: Protects clinic dashboards and CRM data with secure JWT authentication for Administrators, Doctors, and Receptionists.
-*   **CRM & Appointment Booking**: Dynamic scheduling tools with built-in database indexing, allowing the voice receptionist to check patient history, schedule slots, and update appointments in real-time.
-*   **Automated Patient Care Campaigns**: Periodic cron scheduler for pill refills, patient checks, and appointment reminders.
+*   **Multi-Tenant Architecture**: Complete tenant data isolation (`clinic_id`) across patients, appointment books, call histories, prompts, and knowledge bases.
+*   **Carrier & SIP Trunk Integration**: Supports both Bring-Your-Own-Number (per-tenant SIP trunks via LiveKit Cloud) and Indian telephony integration (Vobiz SIP Trunking).
+*   **Low-Latency AI Voice Pipeline**:
+    *   **VAD & Noise Cancellation**: Silero VAD with `BVCTelephony` echo suppression.
+    *   **Speech-to-Text**: Deepgram Nova-2 (`nova-2` Hindi & multilingual model) for high-accuracy phone audio transcription.
+    *   **Resilient Fallback LLM Chain**: `FallbackAdapter` integrating Groq (`llama-3.3-70b-versatile`), Google Gemini (`gemini-flash-lite-latest`), and MiniMax (`MiniMax-Text-01`/`MiniMax-M3`) with provider schema sanitization.
+    *   **Text-to-Speech**: Custom MiniMax streaming TTS (`speech-2.6-turbo` / `speech-02-turbo` / `speech-2.8`) with two-tier RAM/disk PCM audio caching and NumPy soft-knee volume limiter.
+*   **Intelligent Clinic Intake & Scheduling**: Dynamic intent-gated booking supporting both fixed time slots and token/queue numbers, with database-level concurrency protection (`pg_advisory_xact_lock`).
+*   **Security & Hardened Multi-Tenancy**:
+    *   JWT session revocation (`token_version`), account lockout (`failed_login_attempts`), and password strength enforcement.
+    *   Cryptographically separated per-call scoped tokens for the voice agent.
+    *   Pinned TLS CA certificate for PostgreSQL connections.
+    *   Comprehensive append-only audit trail (`audit_logs`).
+*   **Automated Patient Care Campaigns**: Background worker elected via distributed database lease rows (`job_leases`) to dispatch appointment confirmations and WhatsApp reminders via Meta Cloud API.
 
 ---
 
-## 🏗️ Architecture Design
+## 🏗️ Architecture Overview
 
 ```
-                     +----------------------------+
-                     |  Patient / Telephone Call   |
-                     +--------------+-------------+
-                                    |
-                                    | SIP / VoIP
-                                    v
-                     +--------------+-------------+
-                     |  Vobiz Voice Gateway       |
-                     +--------------+-------------+
-                                    |
-                                    | WebSocket (Linear L16 PCM)
-                                    v
-                     +--------------+-------------+
-                     |  FastAPI Middleware        |
-                     +--------------+-------------+
-                                    |
-            +-----------------------+-----------------------+
-            |                       |                       |
-            v (Silence/VAD)         v                       v (Text-to-Speech)
-   +--------+--------+     +--------+--------+     +--------+--------+
-   |   MiniMax STT   |     |   MiniMax LLM   |     |   MiniMax TTS   |
-   | (ASR Wrapper)   |     |   (Tool Calls)  |     |   (PCM Stream)  |
-   +--------+--------+     +--------+--------+     +--------+--------+
-            |                       |                       |
-            | Text                  | DB Query / Write      | Audio Chunks
-            +---------------------->+                       +----------> Vobiz
-                                    |
-                                    v
-                           +--------+--------+
-                           |  MongoDB Atlas  |
-                           |  (CRM / Logs)   |
-                           +-----------------+
+                 +--------------------------------------+
+                 | Caller / Patient Telephone (PSTN)   |
+                 +-------------------+------------------+
+                                     |
+                                     | Inbound SIP Call
+                                     v
+                 +-------------------+------------------+
+                 | LiveKit SIP Inbound Trunk (Cloud)    |
+                 | (Dedicated per-tenant credentials)   |
+                 +-------------------+------------------+
+                                     |
+                                     | WebRTC Audio Tracks
+                                     v
+                 +-------------------+------------------+
+                 | Clarivo Voice Worker (agent/main.py) |
+                 |  - Silero VAD (Noise suppression)    |
+                 |  - Deepgram STT (nova-2)             |
+                 |  - Fallback LLMs (Groq/Gemini/Mini)  |
+                 |  - MiniMax TTS + Audio Caching       |
+                 +-------------------+------------------+
+                                     |
+           Internal Scoped JWT Token | Real-time WebSocket
+           (clinic_id, call_id)      |
+                                     v
+                 +-------------------+------------------+
+                 | FastAPI Backend (backend/app.py)     |
+                 |  - Rate limiting (Redis / Memory)    |
+                 |  - Lease-locked reminder worker      |
+                 |  - Stale call sweeper loop           |
+                 +-------------------+------------------+
+                                     |
+                                     v
+                 +-------------------+------------------+
+                 | PostgreSQL (Supabase ap-south-1)     |
+                 | Pinned CA SSL, Alembic Migrations    |
+                 +-------------------+------------------+
 ```
 
 ---
 
 ## 🛠️ Tech Stack
 
-### Backend
-*   **Python 3.11** & **FastAPI**
-*   **MongoDB & Motor Client** (Asynchronous DB driver)
-*   **Redis & Celery** (Task Queue for campaigns and notifications)
-*   **APScheduler** (Reminders scheduler)
-*   **SlowAPI** (Token bucket rate limiting)
+### Voice Agent (`agent/`)
+*   **LiveKit Agents SDK 1.6.6**
+*   **Deepgram STT** (`nova-2` Hindi & English)
+*   **Groq, Google Gemini & MiniMax** (OpenAI-compatible streaming LLM chain)
+*   **MiniMax TTS** with custom audio limiter and caching
 
-### Frontend
+### Backend (`backend/`)
+*   **Python 3.11** & **FastAPI**
+*   **PostgreSQL & SQLAlchemy 2.0 Async** (via `asyncpg` and Supabase pooler)
+*   **Alembic** (database migrations)
+*   **Redis** (optional rate-limiting & multi-process event bridge)
+*   **SlowAPI** (token bucket rate limiting)
+
+### Frontend (`frontend/`)
 *   **React 19** & **Vite**
-*   **Zustand** (Global state management)
-*   **React Router v7**
-*   **Recharts** (Call analytics visualization)
-*   **Axios** (API client)
+*   **Tailwind CSS**
+*   **Zustand** (global state management)
+*   **React Router v7** (with route code-splitting)
+*   **Recharts** (call analytics visualization)
+*   **Lucide React** (icons)
 
 ---
 
 ## ⚙️ Environment Configuration
 
-Create a `.env` file in the root workspace directory with the following variables:
+Copy `.env.example` to `.env` in the repository root and configure the required keys:
 
 ```env
 # App Configuration
 ENV=development
 SERVER_URL=http://localhost:8000
-JWT_SECRET=super-secret-receptionist-key-change-this-in-production
+APP_BASE_URL=http://localhost:3000
+CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173
+JWT_SECRET=generate-a-strong-secret-with-python-secrets-token-urlsafe-48
+AGENT_INTERNAL_SECRET=generate-another-strong-secret-for-agent-internal-auth
 
-# Databases
-MONGODB_URL=mongodb://localhost:27017
-DATABASE_NAME=ai_receptionist
-REDIS_URL=redis://localhost:6379/0
+# Database (Supabase PostgreSQL)
+DATABASE_URL=
+DB_USER=postgres.your_supabase_project_ref
+DB_PASSWORD="your_db_password"
+DB_HOST=aws-1-ap-south-1.pooler.supabase.com
+DB_PORT=6543
+DB_NAME=postgres
 
-# MiniMax Configuration
-MINIMAX_API_KEY=your_minimax_api_key_here
-MINIMAX_GROUP_ID=your_minimax_group_id_here
-MINIMAX_LLM_MODEL=abab6.5g-chat
-MINIMAX_TTS_MODEL=speech-01-turbo
-MINIMAX_TTS_VOICE=male-qn-qingse
+# LiveKit & Telephony
+LIVEKIT_URL=wss://your-project.livekit.cloud
+LIVEKIT_API_KEY=your_livekit_api_key
+LIVEKIT_API_SECRET=your_livekit_api_secret
 
-# Vobiz Configuration
-VOBIZ_SIP_DOMAIN=your-sip-domain.sip.vobiz.ai
-VOBIZ_USERNAME=your_vobiz_username
-VOBIZ_PASSWORD=your_vobiz_password
-VOBIZ_OUTBOUND_NUMBER=+918045671200
-DEFAULT_TRANSFER_NUMBER=+91XXXXXXXXXX
+# AI Providers
+DEEPGRAM_API_KEY=your_deepgram_api_key
+GROQ_API_KEY=your_groq_api_key
+GEMINI_API_KEY=your_gemini_api_key
+MINIMAX_API_KEY=your_minimax_api_key
+MINIMAX_GROUP_ID=your_minimax_group_id
 ```
 
 ---
@@ -107,68 +132,73 @@ DEFAULT_TRANSFER_NUMBER=+91XXXXXXXXXX
 ## 🏃‍♂️ Quick Start Setup
 
 ### Prerequisites
-*   Docker & Docker Compose installed.
 *   Python 3.10+ (Recommended: 3.11)
+*   Node.js 18+ & npm
+*   PostgreSQL database (or Supabase project)
 
-### 1. Launch Services (Local Dev Database & Redis)
-Spin up local MongoDB and Redis instances in the background:
-```bash
-docker-compose up -d
-```
-
-### 2. Set Up the Backend
-Create a virtual environment, activate it, and install python dependencies:
-```bash
-# From the root directory
+### 1. Set Up the Backend
+```powershell
+# Create and activate virtual environment
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+.\.venv\Scripts\activate   # On Linux/macOS: source .venv/bin/activate
 
-# Install requirements
+# Install verified production dependencies
 pip install -r backend/requirements.txt
 
-# Run the FastAPI server
-python backend/app.py
+# Run migrations
+alembic upgrade head
+
+# Start FastAPI server
+python -m uvicorn backend.app:app --host 0.0.0.0 --port 8000
 ```
-The backend server will run on `http://localhost:8000`.
+Backend API will be live at `http://localhost:8000`. Health probe: `http://localhost:8000/health`.
+
+### 2. Set Up the Voice Agent
+```powershell
+# In a separate terminal, set up the agent environment
+cd agent
+python -m venv .venv
+.\.venv\Scripts\activate   # On Linux/macOS: source .venv/bin/activate
+
+# Install agent dependencies
+pip install -r requirements.txt
+
+# Start agent in development mode
+python main.py dev
+```
 
 ### 3. Set Up the Frontend React Dashboard
-Install packages and start the Vite development server:
-```bash
+```powershell
 cd frontend
 npm install
 npm run dev
 ```
-Open `http://localhost:5173` in your browser.
+Dashboard will run at `http://localhost:5173` (or `http://127.0.0.1:3000`).
 
 ---
 
-## 📡 API Documentation Summary
+## 🧪 Testing & Verification
 
-### Authentication & Tenant Setup
-*   `POST /api/auth/register`: Register a new doctor, create their clinic tenant, and generate a secure JWT token.
-*   `POST /api/auth/login`: Authenticate clinic staff and return credentials.
-*   `GET /api/auth/me`: Fetch details of the currently authenticated session.
-
-### Patients & CRM
-*   `GET /api/patients`: Retrieve patients registered under the logged-in doctor's clinic.
-*   `POST /api/patients`: Manually create a new patient record.
-*   `GET /api/patients/{patient_id}`: Read patient demographic and consultation history.
-
-### Scheduling & Settings
-*   `GET /api/appointments`: List scheduled appointments.
-*   `POST /api/appointments`: Book an appointment slot.
-*   `PUT /api/clinics/settings`: Customize AI voice receptionist parameters (prompts, greetings, routing DIDs).
-
-### Calling & Webhooks
-*   `POST /api/calls/twiml/inbound`: Receives inbound Vobiz calls and responds with bidirectional WebSocket Stream XML.
-*   `POST /api/calls/twiml/outbound`: Callback triggered when outbound Vobiz calls are answered.
-*   `POST /api/calls/twiml/transfer`: Generates Dial XML to redirect active calls.
-*   `POST /api/calls/campaigns/trigger`: Dispatches bulk outbound calls natively via Vobiz.
+*   **Backend Security & Unit Tests**:
+    ```powershell
+    .\.venv\Scripts\python.exe -m pytest backend/tests -v
+    ```
+*   **Frontend Linting & Production Build**:
+    ```powershell
+    cd frontend
+    npm run lint
+    npm run build
+    ```
+*   **Integration Diagnostics**:
+    ```powershell
+    python run_pipeline_test.py
+    ```
 
 ---
 
-## 📈 SaaS Scaling Guide
+## 📖 Key Documentation
 
-1.  **Distributed Task Workers**: Move Celery workers to independent server groups (e.g. AWS ECS or Kubernetes pods) to handle automated reminder campaigns for thousands of clinics concurrently.
-2.  **DID Routing Isolation**: Scale the WebSocket servers horizontally and configure the Vobiz webhooks to query tenant DID metadata from a Redis cache layer for sub-millisecond route resolution.
-3.  **Conversational Interruption (Barge-in)**: Vobiz handles user interruption using the `clearAudio` event. If a patient starts speaking while the AI is talking, listen to the STT active state, discard currently queued output on the WebSocket, and prepare an immediate reply.
+*   [`docs/DEPLOYMENT.md`](file:///c:/Users/acer/Desktop/AI-Calling-Agent/docs/DEPLOYMENT.md) — Production deployment on Linux VM (Caddy, LiveKit region, systemd services).
+*   [`docs/SECURITY-REMEDIATION.md`](file:///c:/Users/acer/Desktop/AI-Calling-Agent/docs/SECURITY-REMEDIATION.md) — Complete security audit tracker and verified contracts.
+*   [`docs/PLAN-number-ownership.md`](file:///c:/Users/acer/Desktop/AI-Calling-Agent/docs/PLAN-number-ownership.md) — Bring-Your-Own-Number per-tenant SIP trunking architecture.
+*   [`docs/PLAN-tenant-approval.md`](file:///c:/Users/acer/Desktop/AI-Calling-Agent/docs/PLAN-tenant-approval.md) — Tenant onboarding, approval gating, and manual plan assignment.

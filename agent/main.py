@@ -405,32 +405,60 @@ async def _clean_tts_stream(text):
 # Backend + SIP helpers
 # ---------------------------------------------------------------------------
 
+# Attribute keys that may carry the SIP trunk the call arrived on, in order of how
+# much we trust them.
+#
+# `clarivo.trunk_id` is set by the per-tenant dispatch rule the backend creates
+# (services/livekit_sip.py), so it is ours and its spelling cannot drift. The
+# `sip.*` variants are LiveKit's own, listed after it and in several casings because
+# the exact key is not something this codebase has ever read before — the full
+# attribute dict is logged on every call below, so the first real call on a new trunk
+# settles it either way.
+_TRUNK_ID_KEYS = ("clarivo.trunk_id", "sip.trunkID", "sip.trunkId", "sip.trunk_id")
+
+
+def _trunk_id_from(attrs):
+    """The LiveKit SIP trunk id from participant attributes, or None."""
+    for key in _TRUNK_ID_KEYS:
+        value = (attrs or {}).get(key)
+        if value:
+            return value
+    return None
+
+
 def _sip_numbers(room):
-    """(dialed DID, caller number) from the SIP participant attributes.
+    """(dialed DID, caller number, trunk id) from the SIP participant attributes.
 
     LiveKit sets sip.trunkPhoneNumber (the called number = our DID) and
-    sip.phoneNumber (the caller) on the SIP participant. (None, None) if absent.
+    sip.phoneNumber (the caller) on the SIP participant. All None if absent.
     """
-    did = caller = None
+    did = caller = trunk_id = None
     try:
         for p in room.remote_participants.values():
             attrs = getattr(p, "attributes", None) or {}
             did = did or attrs.get("sip.trunkPhoneNumber")
             caller = caller or attrs.get("sip.phoneNumber")
+            trunk_id = trunk_id or _trunk_id_from(attrs)
     except Exception:
         pass
-    return did, caller
+    return did, caller, trunk_id
 
 
 async def _resolve_sip_numbers(ctx):
-    """Wait for the SIP caller to actually JOIN, then read the dialed DID + caller
-    number from its attributes.
+    """Wait for the SIP caller to actually JOIN, then read the dialed DID, the caller
+    number, and the trunk the call came in on, from its attributes.
 
     Reading at entrypoint start (before the participant has joined) returns
-    (None, None), which forces the single-clinic fallback (get_only_tenant) and
+    (None, None, None), which forces the single-clinic fallback (get_only_tenant) and
     breaks multi-clinic routing. We also log the full attribute/metadata set so we
     can see exactly which keys LiveKit's SIP trunk populates (the DID may live under
-    a different key, or need to be added via the SIP dispatch rule)."""
+    a different key, or need to be added via the SIP dispatch rule).
+
+    The trunk id matters as much as the DID now. Customers who bring their own number
+    forward it into a trunk that is theirs alone, so the trunk is what identifies the
+    tenant — and it is what lets the backend CHECK the dialed number against that
+    tenant instead of trusting it. Without it, a customer-owned number cannot be
+    verified and will not be answered."""
     part = None
     try:
         part = await asyncio.wait_for(ctx.wait_for_participant(), timeout=8.0)
@@ -446,7 +474,18 @@ async def _resolve_sip_numbers(ctx):
     )
     did = attrs.get("sip.trunkPhoneNumber") or attrs.get("sip.dnis")
     caller = attrs.get("sip.phoneNumber") or attrs.get("sip.from")
-    return did, caller
+    trunk_id = _trunk_id_from(attrs)
+    if not trunk_id:
+        # Not fatal — legacy numbers on the shared Vobiz trunk resolve by DID alone —
+        # but it IS fatal for a customer-owned number, so name the cause here rather
+        # than leaving it to look like an unrecognised number further down.
+        logger.warning(
+            "No trunk id in the SIP attributes (looked for %s). Calls on the shared "
+            "legacy trunk still work; a customer's own number cannot be verified "
+            "without it. Compare the attrs logged above with the dispatch rule.",
+            ", ".join(_TRUNK_ID_KEYS),
+        )
+    return did, caller, trunk_id
 
 
 def _try_parse_iso(s):
@@ -493,12 +532,17 @@ async def _agent_post(path: str, body: dict, timeout: float = 15.0):
     return resp.status_code, data
 
 
-async def _fetch_context(did, call_id=None):
+async def _fetch_context(did, call_id=None, trunk_id=None):
     """Load per-call business config from the backend, and capture the call token.
 
     This is the ONLY request that uses the shared secret. The backend resolves the
-    clinic from the dialed DID and returns a token bound to (clinic, call); storing
-    it here means every later request is scoped to just this call. {} on failure.
+    clinic from the dialed DID and the trunk the call arrived on, and returns a token
+    bound to (clinic, call); storing it here means every later request is scoped to
+    just this call. {} on failure.
+
+    Note what is NOT sent: a clinic id. The backend resolves the tenant itself from
+    these two opaque values, so holding the shared secret does not let this process
+    ask to be answered as any tenant it likes.
     """
     if not INTERNAL_SECRET:
         return {}
@@ -507,7 +551,8 @@ async def _fetch_context(did, call_id=None):
         # this process left a token in a parent context.
         _CALL_TOKEN.set("")
         status, data = await _agent_post(
-            "/api/calls/agent-context", {"did": did, "call_id": call_id}
+            "/api/calls/agent-context",
+            {"did": did, "call_id": call_id, "trunk_id": trunk_id},
         )
         if status == 200 and data.get("success"):
             ctx_data = data.get("data") or {}
@@ -633,7 +678,7 @@ class VoxAgent(Agent):
         `booking_mode` stays as a hint that saves the backend one tenant read; it
         is re-read from the DB if it is not a value the backend recognises.
         """
-        _live_did, caller = _sip_numbers(get_job_context().room)
+        _live_did, caller, _live_trunk = _sip_numbers(get_job_context().room)
         return {
             "caller_phone": caller,
             "booking_mode": self._booking_mode,
@@ -867,7 +912,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # greets, behaves, and books correctly for that specific clinic. We WAIT for the
     # SIP participant so the DID is actually available (reading too early gave
     # None -> single-clinic fallback, which can't work for multiple clinics).
-    did, caller = await _resolve_sip_numbers(ctx)
+    did, caller, trunk_id = await _resolve_sip_numbers(ctx)
 
     # Stale-dispatch guard. After a network outage LiveKit delivers the job requests
     # it queued up, including ones for calls the caller already abandoned. Those rooms
@@ -888,10 +933,13 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # fetching context, because the per-call token is bound to it.
     call_id = ctx.room.name
 
-    ctx_data = await _fetch_context(did, call_id)
+    ctx_data = await _fetch_context(did, call_id, trunk_id)
     clinic_id = ctx_data.get("clinic_id")
     business_name = ctx_data.get("business_name") or "our business"
-    logger.info(f"Call context: did={did} caller={caller} clinic={clinic_id} business={business_name!r}")
+    logger.info(
+        f"Call context: did={did} caller={caller} trunk={trunk_id} "
+        f"clinic={clinic_id} business={business_name!r}"
+    )
 
     # Log the call so the dashboard can show it — live now, and in history after.
     # The clinic is taken from the call token server-side, so it is not sent here.

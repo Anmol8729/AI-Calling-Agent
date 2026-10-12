@@ -92,13 +92,25 @@ def effective_call_limit(subscription_key: Optional[str], override: Optional[int
 
 
 def included_numbers(subscription_key: Optional[str], override: Optional[int] = None) -> int:
-    """How many phone numbers a plan may claim.
+    """How many phone numbers a plan may connect.
 
-    This is a SPEND control, not a feature flag. Every DID carries a real cost
-    (roughly â‚¹100 setup plus â‚¹500/month at the time of writing), and claiming one
-    consumes a number from a finite pool that other clients also draw from. Before
-    this cap, any account â€” including a free trial â€” could hit `POST
-    /phone-numbers/provision` in a loop and run up an unbounded bill.
+    This USED to be a spend control, and the distinction matters for how it is set.
+    When Clarivo bought the DIDs, each one cost us roughly ₹100 setup plus ₹500/month
+    out of a finite pool, so the cap was protecting a bill that an unbounded loop
+    through `POST /phone-numbers/provision` could run up.
+
+    Under the current model the customer holds the number with their own operator and
+    pays for it themselves, so connecting one costs us nothing but a row and an entry on
+    a LiveKit trunk. It is now a plain FEATURE limit: what a tier is worth, not what we
+    can afford. Two consequences worth being deliberate about rather than inheriting:
+
+      * The numbers can be raised freely. Nothing breaks at 5 or 50; the old figures
+        were priced against a cost that no longer applies.
+      * The cap must be applied to BOTH doors. It once guarded only `/provision`, so a
+        tenant could walk straight past it by connecting numbers instead of claiming
+        them — while those connected numbers still counted against the cap, which made
+        the limit read as arbitrary rather than generous. `POST /phone-numbers/` enforces
+        it too now.
 
     Trial gets exactly one so a client can still evaluate the product end to end.
     A per-tenant `number_limit` override lets you agree a bigger allowance for one

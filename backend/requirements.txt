@@ -51,6 +51,18 @@ httpx==0.28.1
 # self-signed and is pinned separately at backend/certs/.
 certifi==2026.6.17
 
+# ----- telephony control plane -----
+# LiveKit server API, used ONLY for SIP inbound trunks + dispatch rules
+# (backend/services/livekit_sip.py). Clients own their phone numbers with their own
+# operator and forward SIP to a trunk we create per tenant, so the trunk is now a
+# per-customer resource the dashboard has to manage — it can no longer be a single
+# hand-made object in the LiveKit console.
+#
+# This is the server SDK only (~18 kB + protobufs). It is NOT livekit-agents: the
+# voice agent keeps its own separate venv under agent/, and nothing here touches
+# WebRTC or the media path.
+livekit-api==1.0.7
+
 # ----- rate limiting -----
 slowapi==0.1.10
 # slowapi's storage layer; pinned explicitly because the Redis-backed limiter

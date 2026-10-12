@@ -186,10 +186,26 @@ async def register(request: Request, payload: UserRegister, db: AsyncSession = D
     role = SELF_SIGNUP_ROLE
 
     # Create Tenant (the client's business) first, when applicable.
+    #
+    # `payload.did` is accepted by the schema for backward compatibility and
+    # deliberately IGNORED. Signup used to take a phone number here and write both
+    # `tenants.did` and a `phone_numbers` row marked active. Neither is safe now:
+    #
+    #   * A number has to be attached to the tenant's own SIP trunk and then proven by
+    #     a real inbound call before it can route (see services/livekit_sip.py). Signup
+    #     cannot do either, so it produced a number that looked connected in the
+    #     dashboard, had no connection details to hand to an operator, and silently
+    #     rejected every call.
+    #   * `tenants.did` has no status and no verification, and it is still consulted as
+    #     a fallback for tenants with no managed numbers. Setting it from an
+    #     unauthenticated signup form meant anyone could type a number they did not own
+    #     and have calls to it resolved to their account.
+    #
+    # Numbers are added in Setup, which creates the trunk and shows the customer what
+    # to give their operator.
     clinic_id = None
     if payload.clinic_name or role == SELF_SIGNUP_ROLE:
         clinic_name = payload.clinic_name or f"{payload.name}'s Business"
-        did_val = payload.did.strip() if payload.did else None
         # Seed the agent with a vertical-specific starter prompt/greeting from
         # the chosen industry template (falls back to the generic defaults when
         # no/unknown industry is given). The client can edit these in Settings.
@@ -197,7 +213,6 @@ async def register(request: Request, payload: UserRegister, db: AsyncSession = D
         tenant = Tenant(
             name=clinic_name,
             subscription="free",
-            did=did_val or None,
             industry=(payload.industry.strip().lower() if tmpl else None),
             system_prompt=(tmpl["system_prompt"] if tmpl else None),
             initial_greeting=(tmpl["initial_greeting"] if tmpl else None),
@@ -209,14 +224,10 @@ async def register(request: Request, payload: UserRegister, db: AsyncSession = D
             await db.rollback()
             return api_response(
                 success=False,
-                message="That clinic phone number (DID) is already registered",
+                message="Could not create the business account. Please try again.",
                 status_code=400,
             )
         clinic_id = tenant.id
-        if did_val:
-            logger.info(f"Registered clinic {clinic_name} with DID {did_val}")
-            pn = PhoneNumber(clinic_id=clinic_id, number=did_val, label="Primary DID", status="active")
-            db.add(pn)
 
     # Create the user
     user = User(

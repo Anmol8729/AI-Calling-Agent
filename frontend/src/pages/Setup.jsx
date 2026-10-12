@@ -7,6 +7,7 @@ import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
 import { Section, Label, Hint, Field } from "../components/ui/Form";
 import WhatsAppConfig from "../components/WhatsAppConfig";
+import SipConnectionCard from "../components/SipConnectionCard";
 import Modal from "../components/Modal";
 import DataTable from "../components/DataTable";
 import { INDUSTRIES } from "../lib/industries";
@@ -298,18 +299,38 @@ export default function Setup() {
   );
 }
 
+/**
+ * Your phone numbers.
+ *
+ * Clarivo does not supply numbers. The customer keeps their number with their own
+ * telephony operator and forwards it to the Clarivo connection shown below, which is
+ * why the old copy here ("Get a number in one click", "instantly ready to take calls",
+ * "We'll email you the details") is gone — the first two describe a model we stepped
+ * away from, and the email never existed in the first place.
+ *
+ * A connected number is not live straight away. It shows as "Waiting for test call"
+ * until the customer's first real call proves the number is theirs; that proof is the
+ * call arriving on THEIR connection with THEIR credentials, so there is no code to
+ * enter and nothing to paste back.
+ */
 function PhoneNumbersSection() {
   const [numbers, setNumbers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [banner, setBanner] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ number: "", label: "" });
+  const [form, setForm] = useState({ number: "", label: "", provider: "" });
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
-  // One-click provisioning: whether the platform can hand out a ready number.
+  // Whether the platform may hand out a number from its own inventory. Off unless a
+  // channel-partner arrangement is in place (settings.ALLOW_PLATFORM_NUMBERS), so this
+  // is normally false and the bring-your-own flow is the whole panel.
   const [provisionInfo, setProvisionInfo] = useState({ enabled: false, available: 0 });
   const [provisioning, setProvisioning] = useState(false);
+  const [connection, setConnection] = useState(null);
+  const [rotating, setRotating] = useState(false);
+  const [savingAllowed, setSavingAllowed] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -327,6 +348,14 @@ function PhoneNumbersSection() {
     } catch {
       setProvisionInfo({ enabled: false, available: 0 });
     }
+    try {
+      const conn = await api.get("/phone-numbers/connection");
+      setConnection(conn.data?.success ? conn.data.data || null : null);
+    } catch {
+      // Staff roles are refused this endpoint, and a clinic with no numbers has no
+      // connection yet. Neither is an error worth showing.
+      setConnection(null);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -336,11 +365,15 @@ function PhoneNumbersSection() {
     if (!form.number.trim()) { setFormError("Enter the phone number you want to connect."); return; }
     setSubmitting(true);
     try {
-      const res = await api.post("/phone-numbers/", { number: form.number.trim(), label: form.label.trim() || null });
+      const res = await api.post("/phone-numbers/", {
+        number: form.number.trim(),
+        label: form.label.trim() || null,
+        provider: form.provider.trim() || null,
+      });
       if (res.data?.success) {
         setOpen(false);
-        setForm({ number: "", label: "" });
-        setBanner({ type: "success", text: "Number connected. Point its provider webhook at your Clarivo inbound URL to receive calls." });
+        setForm({ number: "", label: "", provider: "" });
+        setBanner({ type: "success", text: res.data.message });
         load();
       } else {
         setFormError(res.data?.message || "Could not connect the number.");
@@ -352,8 +385,8 @@ function PhoneNumbersSection() {
     }
   };
 
-  // Claim a ready-to-use number: the backend picks a free one, routes it to the
-  // voice agent, and links it to this business — no provider setup needed.
+  // Only reachable when platform provisioning is switched on. Left in place because it
+  // is the path a signed channel-partner agreement would re-enable.
   const getNumber = async () => {
     setBanner(null);
     setProvisioning(true);
@@ -374,7 +407,7 @@ function PhoneNumbersSection() {
 
   const openConnect = () => {
     setFormError("");
-    setForm({ number: "", label: "" });
+    setForm({ number: "", label: "", provider: "" });
     setOpen(true);
   };
 
@@ -384,7 +417,9 @@ function PhoneNumbersSection() {
     const next = row.status === "active" ? "inactive" : "active";
     try {
       const res = await api.put(`/phone-numbers/${row.id}`, { status: next });
-      if (res.data?.success) setNumbers((prev) => prev.map((n) => (n.id === row.id ? { ...n, status: next } : n)));
+      // Reload rather than patching in place: switching a number off also takes it off
+      // the connection, so the card's number list has to move with it.
+      if (res.data?.success) load();
       else setBanner({ type: "error", text: res.data?.message || "Could not update the number." });
     } catch (err) {
       setBanner({ type: "error", text: extractError(err) });
@@ -407,10 +442,80 @@ function PhoneNumbersSection() {
     }
   };
 
+  const rotateCredentials = async () => {
+    setBanner(null);
+    setRotating(true);
+    try {
+      const res = await api.post("/phone-numbers/connection/rotate", {});
+      if (res.data?.success) {
+        setConnection(res.data.data || null);
+        setBanner({ type: "success", text: res.data.message });
+      } else {
+        setBanner({ type: "error", text: res.data?.message || "Could not rotate the credentials." });
+      }
+    } catch (err) {
+      setBanner({ type: "error", text: extractError(err) });
+    } finally {
+      setRotating(false);
+    }
+  };
+
+  // Retry a connection that was left pending because LiveKit was unreachable when the
+  // number was added. Idempotent server-side — it reuses the existing credentials.
+  const retryConnection = async () => {
+    setBanner(null);
+    setRetrying(true);
+    try {
+      const res = await api.post("/phone-numbers/connection", {});
+      setConnection(res.data?.data || null);
+      setBanner({
+        type: res.data?.data?.status === "active" ? "success" : "error",
+        text: res.data?.message || "Could not finish the connection.",
+      });
+    } catch (err) {
+      setBanner({ type: "error", text: extractError(err) });
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const saveAllowedAddresses = async (value) => {
+    setBanner(null);
+    setSavingAllowed(true);
+    try {
+      const res = await api.put("/phone-numbers/connection", { allowed_addresses: value });
+      if (res.data?.success) {
+        setConnection(res.data.data || null);
+        setBanner({ type: "success", text: "Connection updated." });
+      } else {
+        setBanner({ type: "error", text: res.data?.message || "Could not update the connection." });
+      }
+    } catch (err) {
+      setBanner({ type: "error", text: extractError(err) });
+    } finally {
+      setSavingAllowed(false);
+    }
+  };
+
   const columns = [
     { key: "number", header: "Phone number" },
     { key: "label", header: "Label", render: (row) => row.label || "—" },
-    { key: "status", header: "Status", render: (row) => <Badge tone={row.status === "active" ? "success" : "neutral"}>{row.status}</Badge> },
+    { key: "provider", header: "Operator", render: (row) => row.provider || "—" },
+    {
+      key: "status",
+      header: "Status",
+      // One column for two facts, because the customer only cares about the outcome.
+      // `verification_status` outranks `status`: a number switched on but unproven is
+      // not taking calls, so showing it as live would be a lie.
+      render: (row) => {
+        if (row.verification_status !== "verified") {
+          return <Badge tone="info">Waiting for test call</Badge>;
+        }
+        return row.status === "active"
+          ? <Badge tone="success">Live</Badge>
+          : <Badge tone="neutral">Paused</Badge>;
+      },
+    },
     {
       key: "actions",
       header: "Actions",
@@ -425,67 +530,72 @@ function PhoneNumbersSection() {
     },
   ];
 
+  const awaitingVerification = numbers.some((n) => n.verification_status !== "verified");
+
   return (
-    <Section icon={PhoneCall} title="Your phone numbers" action={
-      <div className="flex flex-wrap gap-2">
-        {provisionInfo.enabled && (
-          <Button onClick={getNumber} disabled={provisioning}>
-            {provisioning ? "Setting up..." : "Get a number"}
-          </Button>
-        )}
-        {provisionInfo.enabled ? (
-          <Button variant="secondary" onClick={openConnect}>
-            <Plus className="h-4 w-4" /> Connect number
-          </Button>
-        ) : (
-          <Button onClick={openConnect}>
-            <Plus className="h-4 w-4" /> Connect number
-          </Button>
-        )}
-      </div>
-    }>
-      <p className="text-sm text-gray-500">
-        {provisionInfo.enabled
-          ? "Get a number in one click and it's instantly ready to take calls — no provider setup. Or connect a number you already own."
-          : "Connect a number you own with your telephony provider. Calls to an active number are answered by your assistant."}
-      </p>
-
-      {banner && (
-        <div className={`flex items-start justify-between gap-3 rounded-2xl border p-4 text-sm ${banner.type === "success" ? "border-emerald-100 bg-emerald-50 text-emerald-800" : "border-red-100 bg-red-50 text-red-800"}`}>
-          <span>{banner.text}</span>
-          <button className="text-xs font-medium opacity-70 hover:opacity-100" onClick={() => setBanner(null)}>Dismiss</button>
-        </div>
-      )}
-
-      <DataTable
-        columns={columns}
-        rows={numbers}
-        loading={loading}
-        emptyTitle="No numbers connected yet"
-        emptyDescription={
-          provisionInfo.enabled
-            ? "Your assistant needs a phone number to answer calls. Get one in a click, or connect a number you already own."
-            : "Your assistant needs a phone number to answer calls. Connect a number you own with your telephony provider."
-        }
-        emptyIcon={PhoneCall}
-        emptyAction={
-          provisionInfo.enabled ? (
+    <>
+      <Section icon={PhoneCall} title="Your phone numbers" action={
+        <div className="flex flex-wrap gap-2">
+          {provisionInfo.enabled && (
             <Button onClick={getNumber} disabled={provisioning}>
               {provisioning ? "Setting up..." : "Get a number"}
             </Button>
-          ) : (
+          )}
+          <Button variant={provisionInfo.enabled ? "secondary" : undefined} onClick={openConnect}>
+            <Plus className="h-4 w-4" /> Connect number
+          </Button>
+        </div>
+      }>
+        <p className="text-sm text-gray-500">
+          Connect a number you hold with your own telephony operator, then point it at
+          your Clarivo connection below. You stay the owner of the number, so you can
+          move it or take it back at any time.
+        </p>
+
+        {banner && (
+          <div className={`flex items-start justify-between gap-3 rounded-2xl border p-4 text-sm ${banner.type === "success" ? "border-emerald-100 bg-emerald-50 text-emerald-800" : "border-red-100 bg-red-50 text-red-800"}`}>
+            <span>{banner.text}</span>
+            <button className="text-xs font-medium opacity-70 hover:opacity-100" onClick={() => setBanner(null)}>Dismiss</button>
+          </div>
+        )}
+
+        <DataTable
+          columns={columns}
+          rows={numbers}
+          loading={loading}
+          emptyTitle="No numbers connected yet"
+          emptyDescription="Your assistant needs a phone number to answer calls. Connect one you hold with your telephony operator — we'll show you exactly what to give them."
+          emptyIcon={PhoneCall}
+          emptyAction={
             <Button onClick={openConnect}>
               <Plus className="h-4 w-4" /> Connect number
             </Button>
-          )
-        }
+          }
+        />
+
+        {awaitingVerification && (
+          <p className="text-xs text-gray-400">
+            A number stays on "Waiting for test call" until you've set up forwarding with
+            your operator and called it once. Your connection details are below.
+          </p>
+        )}
+      </Section>
+
+      <SipConnectionCard
+        connection={connection}
+        onRotate={rotateCredentials}
+        onSaveAllowed={saveAllowedAddresses}
+        onRetry={retryConnection}
+        rotating={rotating}
+        savingAllowed={savingAllowed}
+        retrying={retrying}
       />
 
       <Modal
         open={open}
         onClose={() => setOpen(false)}
         title="Connect a phone number"
-        description="Enter a number you already own with your telephony provider."
+        description="A number you hold with your own telephony operator."
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
@@ -497,14 +607,15 @@ function PhoneNumbersSection() {
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Phone number" value={form.number} onChange={(v) => setForm((f) => ({ ...f, number: v }))} placeholder="+919812345678" />
           <Field label="Label" value={form.label} onChange={(v) => setForm((f) => ({ ...f, label: v }))} placeholder="Main line" />
+          <Field label="Your operator" value={form.provider} onChange={(v) => setForm((f) => ({ ...f, provider: v }))} placeholder="Airtel, Tata Tele, Exotel..." hint="Optional. Helps support if calls don't come through." />
         </div>
         <p className="mt-4 flex items-start gap-2 text-xs text-gray-400">
           <PhoneCall className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          Use this if you already own a number with a telephony provider. We'll email you the details needed to
-          point it at your assistant — or use "Get a number" for instant setup.
+          Next: we'll show you the SIP details to give your operator. Once they've pointed
+          the number at us, call it once and it goes live by itself.
         </p>
       </Modal>
-    </Section>
+    </>
   );
 }
 

@@ -59,7 +59,10 @@ export const useAuthStore = create((set) => ({
     }
   },
 
-  register: async (email, password, name, clinicName, did, industry) => {
+  // No `did` argument any more. A phone number has to be attached to the tenant's own
+  // SIP trunk and proven by a real inbound call before it can route, and signup can do
+  // neither — the backend now ignores the field. Numbers are added in Setup.
+  register: async (email, password, name, clinicName, industry) => {
     set({ loading: true, error: null });
     try {
       const response = await api.post(`/auth/register`, {
@@ -68,7 +71,6 @@ export const useAuthStore = create((set) => ({
         name,
         clinic_name: clinicName,
         role: "doctor",
-        did,
         industry
       });
       

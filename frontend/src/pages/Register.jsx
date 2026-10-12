@@ -11,14 +11,13 @@ export default function Register() {
   const [password, setPassword] = useState("");
   const [clinicName, setClinicName] = useState("");
   const [industry, setIndustry] = useState(DEFAULT_INDUSTRY);
-  const [did, setDid] = useState("");
   const { register, error, loading } = useAuthStore();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!email || !password || !name || !clinicName) return;
-    const success = await register(email, password, name, clinicName, did, industry);
+    const success = await register(email, password, name, clinicName, industry);
     if (success) {
       navigate("/dashboard");
     }
@@ -84,20 +83,12 @@ export default function Register() {
               />
             </div>
             
-            <div>
-              <label htmlFor="did-number" className="text-sm font-medium text-gray-700">
-                Vobiz DID Number (Optional)
-              </label>
-              <input
-                id="did-number"
-                name="did"
-                type="text"
-                className="mt-1 block w-full rounded-2xl border border-gray-200 px-4 py-2.5 text-gray-900 placeholder-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:text-sm"
-                placeholder="+918045671200"
-                value={did}
-                onChange={(e) => setDid(e.target.value)}
-              />
-            </div>
+            {/* The "Vobiz DID Number" field was removed. A phone number now has to be
+                attached to this business's own SIP trunk and proven by a real inbound
+                call before it can take traffic, and signup can do neither — so a number
+                entered here looked connected while silently rejecting every call, with
+                no connection details anywhere to give an operator. Numbers are added in
+                Setup, which creates the connection and shows exactly what to hand over. */}
 
             <div>
               <label htmlFor="doctor-name" className="text-sm font-medium text-gray-700">

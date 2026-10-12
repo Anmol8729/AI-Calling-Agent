@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.integrations.vobiz.client import VobizClient
 from backend.config.settings import settings
 from backend.services.db import get_db
-from backend.services import repository, notifications, events
+from backend.services import repository, notifications, events, audit
 from backend.services.call_tokens import mint_call_token, verify_call_token, token_ttl_minutes
 from backend.services.plans import effective_call_limit
 from backend.routes.auth import get_current_user
@@ -257,9 +257,15 @@ def _did_variants(did: str):
 async def _resolve_tenant_from_did(did):
     """Resolve the tenant from the DIALED NUMBER only (never from client input).
 
-    Tries the number's common format variants, then falls back to the sole tenant
-    when the platform has exactly one (a dev convenience that cannot cross tenants
-    — with two or more clinics `get_only_tenant()` returns None rather than guess).
+    The LEGACY path, for calls arriving on the shared Vobiz trunk carrying numbers
+    Clarivo itself subscribed to. Tries the number's common format variants, then falls
+    back to the sole tenant when the platform has exactly one (a dev convenience that
+    cannot cross tenants — with two or more clinics `get_only_tenant()` returns None
+    rather than guess).
+
+    Only reachable when the call carried no trunk id. A customer-owned number arrives
+    on its own trunk and is resolved by `_resolve_tenant_for_call` below, which can
+    check the number against the tenant instead of taking it at face value.
     """
     if did:
         for cand in _did_variants(did):
@@ -267,6 +273,45 @@ async def _resolve_tenant_from_did(did):
             if tenant:
                 return tenant
     return await repository.get_only_tenant()
+
+
+async def _resolve_tenant_for_call(payload):
+    """(tenant, refusal, detail) for one inbound call.
+
+    `tenant` is None when the call must not be answered, and `refusal` is then a short
+    machine-readable reason for the log and the audit trail.
+
+    Which path runs is decided by whether the call carried a trunk id, not by
+    configuration: a customer-owned number comes in on its own authenticated trunk, a
+    legacy platform number comes in on the shared one, and both need to keep working
+    during the migration between the two.
+    """
+    variants = _did_variants(payload.did)
+    trunk_id = (payload.trunk_id or "").strip()
+
+    if trunk_id:
+        result = await repository.resolve_trunk_call(trunk_id, variants)
+        outcome = result.get("outcome")
+        if outcome == "ok":
+            return result.get("tenant"), "", result
+        return None, outcome or "trunk_unresolved", result
+
+    tenant = await _resolve_tenant_from_did(payload.did)
+    if tenant is not None:
+        return tenant, "", {}
+
+    # Nothing matched. Work out WHY before giving up, because the two likely causes
+    # need different fixes and neither is visible from "no clinic for DID".
+    state = await repository.find_number_state(variants)
+    if state.get("exists") and state.get("verification_status") != "verified":
+        # The number is registered but unproven, and the call reached us without a
+        # trunk id — so either the agent is an older build that does not forward it,
+        # or the dispatch rule is not stamping it. Verification can never complete in
+        # that state, so say so plainly rather than letting it look like a bad number.
+        return None, "pending_without_trunk", state
+    if state.get("exists"):
+        return None, "number_inactive", state
+    return None, "did_unresolved", state
 
 
 def _publish_appt_event(clinic_id, appt_id, name, display):
@@ -396,10 +441,21 @@ async def agent_book_appointment(
 #       issued by /agent-context. --------------------------------------------
 
 class AgentContextRequest(BaseModel):
-    # The DIALED number. This is the only thing that decides which tenant the
-    # agent gets, and it comes from the SIP participant attributes, not from
-    # anything a caller can set.
+    # The DIALED number. On the legacy shared trunk this is the only thing that
+    # decides which tenant the agent gets, and it comes from the SIP participant
+    # attributes, not from anything a caller can set.
     did: Optional[str] = None
+    # The LiveKit SIP trunk the call arrived on, when there is one. Customers who
+    # bring their own number forward it into a trunk that belongs to them alone, so
+    # this identifies the tenant far more directly than the dialed number does — and
+    # it is what allows the dialed number to be CHECKED against the tenant rather
+    # than trusted.
+    #
+    # Note what this is not: a clinic_id. The agent never gets to say which tenant to
+    # load — that was removed deliberately (C2) because it made the shared agent
+    # secret a master key over every tenant. This is an opaque LiveKit id that the
+    # backend maps to a tenant itself, exactly like `did`.
+    trunk_id: Optional[str] = None
     # Unique id for this call (the LiveKit room name). The issued token is bound
     # to it, so it cannot be replayed against a different call.
     call_id: Optional[str] = None
@@ -441,12 +497,61 @@ async def agent_context(
     if not _agent_secret_ok(x_internal_secret):
         return api_response(success=False, message="Unauthorized", status_code=401)
 
-    tenant = await _resolve_tenant_from_did(payload.did)
+    tenant, refusal, detail = await _resolve_tenant_for_call(payload)
     if tenant is None:
-        logger.warning(f"agent-context: no clinic for DID {payload.did!r}")
+        if refusal == "wrong_tenant":
+            # A call authenticated as one tenant asked to be answered as another. This
+            # is the case per-tenant trunks exist to catch, so it is recorded against
+            # the trunk's owner rather than only logged: it is either a misconfigured
+            # forward at an operator or an attempt to intercept another business's
+            # calls, and both need to be answerable after the fact.
+            logger.error(
+                "agent-context: trunk %r (clinic %s) presented %r, which belongs to "
+                "clinic %s — refusing.",
+                payload.trunk_id, detail.get("clinic_id"), detail.get("number"),
+                detail.get("owner_clinic_id"),
+            )
+            await audit.record(
+                audit.NUMBER_CLAIM_REJECTED,
+                clinic_id=detail.get("clinic_id"),
+                outcome="failure",
+                target_type="phone_number",
+                detail={
+                    "number": detail.get("number"),
+                    "livekit_trunk_id": payload.trunk_id,
+                    "owner_clinic_id": detail.get("owner_clinic_id"),
+                },
+            )
+        elif refusal == "pending_without_trunk":
+            logger.error(
+                "agent-context: %r is registered but still unverified, and the call "
+                "arrived with NO trunk id, so it can never be verified. Check that the "
+                "agent forwards the trunk id (sip.trunkID / clarivo.trunk_id) and that "
+                "the LiveKit dispatch rule sets it. DID=%r",
+                detail.get("number"), payload.did,
+            )
+        else:
+            logger.warning(
+                "agent-context: could not resolve a clinic (reason=%s did=%r trunk=%r)",
+                refusal, payload.did, payload.trunk_id,
+            )
         return api_response(success=False, message="Could not resolve a clinic.", status_code=404)
 
     clinic_id = tenant.get("id")
+    if detail.get("verified_now"):
+        # First proven call on a customer-owned number. Logged as its own event because
+        # it is the moment the number became able to take real traffic.
+        logger.info(
+            f"agent-context: {detail.get('number')} verified for clinic {clinic_id} "
+            f"by this call"
+        )
+        await audit.record(
+            audit.NUMBER_VERIFIED,
+            clinic_id=clinic_id,
+            target_type="phone_number",
+            target_id=detail.get("number_id"),
+            detail={"number": detail.get("number"), "livekit_trunk_id": payload.trunk_id},
+        )
     # Without a call id there is nothing to bind the token to, so fall back to a
     # random one rather than issuing something broader in scope.
     call_id = (payload.call_id or "").strip() or f"call-{secrets.token_hex(8)}"

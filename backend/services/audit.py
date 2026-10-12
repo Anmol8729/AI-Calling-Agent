@@ -35,6 +35,22 @@ NUMBER_CONNECTED = "number.connected"
 NUMBER_PROVISIONED = "number.provisioned"
 NUMBER_REMOVED = "number.removed"
 NUMBER_UPDATED = "number.updated"
+# Ownership of a bring-your-own number was proven by a call arriving on the tenant's
+# own SIP trunk. Recorded because it is the moment a number became able to receive
+# real calls, and because "who proved this number, and when" is the question asked if
+# two businesses ever dispute the same line.
+NUMBER_VERIFIED = "number.verified"
+# A call authenticated as one tenant asked for a number belonging to another. Either a
+# misconfiguration at an operator or an attempt to capture someone else's calls —
+# either way, the one event here that should be read as a possible attack.
+NUMBER_CLAIM_REJECTED = "number.claim_rejected"
+
+# Per-tenant SIP trunk lifecycle. These describe resources that live in LiveKit rather
+# than in this database, so the audit trail is the only local record that they were
+# created, re-credentialled, or removed.
+TRUNK_CREATED = "trunk.created"
+TRUNK_CREDENTIALS_ROTATED = "trunk.credentials_rotated"
+TRUNK_UPDATED = "trunk.updated"
 
 ADMIN_PLAN_CHANGED = "admin.plan_changed"
 ADMIN_UPGRADE_REVIEWED = "admin.upgrade_request_reviewed"
