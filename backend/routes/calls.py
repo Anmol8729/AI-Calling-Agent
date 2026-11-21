@@ -294,7 +294,11 @@ async def _resolve_tenant_for_call(payload):
         outcome = result.get("outcome")
         if outcome == "ok":
             return result.get("tenant"), "", result
-        return None, outcome or "trunk_unresolved", result
+        if outcome != "unknown_trunk":
+            return None, outcome or "trunk_unresolved", result
+        logger.warning(
+            f"Trunk {trunk_id} not registered in sip_trunks — falling back to DID resolution for {payload.did}"
+        )
 
     tenant = await _resolve_tenant_from_did(payload.did)
     if tenant is not None:

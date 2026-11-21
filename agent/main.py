@@ -1079,7 +1079,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             os.getenv("AGENT_MINIMAX_LAST_RESORT", "1").strip() == "0" or _provider
         ):
             return
-        _minimax_model = os.getenv("MINIMAX_LLM_MODEL", "MiniMax-Text-01")
+        _minimax_model = os.getenv("MINIMAX_LLM_MODEL", "MiniMax-M3.1-Flash")
         _chain.append(_StrictSchemaLLM(
             model=_minimax_model,
             api_key=_minimax_key,
@@ -1109,7 +1109,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         # accepts the request but never streams (the earlier flash-lite hang).
         agent_llm = _lk_llm.FallbackAdapter(
             _chain,
-            attempt_timeout=float(os.getenv("AGENT_LLM_ATTEMPT_TIMEOUT", "6") or "6"),
+            attempt_timeout=float(os.getenv("AGENT_LLM_ATTEMPT_TIMEOUT", "3.5") or "3.5"),
             max_retry_per_llm=0,
         )
         logger.info(f"LLM = {_labels[0]} (fallbacks: {', '.join(_labels[1:])})")
