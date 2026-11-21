@@ -77,11 +77,21 @@ function fetchActivity() {
   ]);
 }
 
-// Derive the WebSocket URL from the REST base (VITE_API_URL): swap http->ws and
+// Derive the WebSocket URL from the REST base: swap http->ws and
 // drop the trailing /api, then add the notifications path + auth token.
 function notificationsWsUrl() {
-  const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
-  const base = apiBase.replace(/^http/i, "ws").replace(/\/api\/?$/i, "");
+  let base;
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host !== "app.clarivo.net.in" && host !== "clarivo-dashboard-git.pages.dev" && host !== "localhost" && host !== "127.0.0.1") {
+      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+      base = `${proto}//${window.location.host}`;
+    }
+  }
+  if (!base) {
+    const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+    base = apiBase.replace(/^http/i, "ws").replace(/\/api\/?$/i, "");
+  }
   const token = localStorage.getItem("token") || "";
   return `${base}/ws/notifications?token=${encodeURIComponent(token)}`;
 }
