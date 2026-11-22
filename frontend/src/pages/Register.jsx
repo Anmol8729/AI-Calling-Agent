@@ -60,7 +60,7 @@ export default function Register() {
                 onChange={(e) => setIndustry(e.target.value)}
               >
                 {INDUSTRIES.map((opt) => (
-                  <option key={opt.key} value={opt.key}>{opt.label}</option>
+                  <option key={opt.key} value={opt.key} className="bg-white dark:bg-[#111315] text-[#0F172A] dark:text-[#F5F7FA]">{opt.label}</option>
                 ))}
               </select>
             </div>

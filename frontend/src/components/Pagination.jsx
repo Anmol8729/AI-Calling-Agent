@@ -95,7 +95,7 @@ export default function Pagination({
           aria-label={`Rows per page`}
         >
           {pageSizeOptions.map((n) => (
-            <option key={n} value={n}>{n} per page</option>
+            <option key={n} value={n} className="bg-white dark:bg-[#111315] text-[#0F172A] dark:text-[#F5F7FA]">{n} per page</option>
           ))}
         </select>
       )}

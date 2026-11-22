@@ -5,6 +5,7 @@ import DataTable from "../components/DataTable";
 import Modal from "../components/Modal";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
+import { inputClass } from "../lib/inputStyles";
 
 const nf = new Intl.NumberFormat("en-IN");
 
@@ -305,40 +306,40 @@ export default function Admin() {
         )}
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">Status</label>
+            <label className="block text-[11px] font-semibold uppercase tracking-[0.05em] text-[#64748B] dark:text-[#A1A1AA]">Status</label>
             <select
-              className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
+              className={inputClass()}
               value={selectedStatus}
               onChange={(e) => setSelectedStatus(e.target.value)}
             >
-              <option value="active">Active</option>
-              <option value="pending">Pending</option>
-              <option value="suspended">Suspended</option>
+              <option value="active" className="bg-white dark:bg-[#111315] text-[#0F172A] dark:text-[#F5F7FA]">Active</option>
+              <option value="pending" className="bg-white dark:bg-[#111315] text-[#0F172A] dark:text-[#F5F7FA]">Pending</option>
+              <option value="suspended" className="bg-white dark:bg-[#111315] text-[#0F172A] dark:text-[#F5F7FA]">Suspended</option>
             </select>
           </div>
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">Plan</label>
+            <label className="block text-[11px] font-semibold uppercase tracking-[0.05em] text-[#64748B] dark:text-[#A1A1AA]">Plan</label>
             <select
-              className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
+              className={inputClass()}
               value={planKey}
               onChange={(e) => setPlanKey(e.target.value)}
             >
               {plans.map((p) => (
-                <option key={p.key} value={p.key}>{p.name} ({nf.format(p.monthly_call_limit)}/mo)</option>
+                <option key={p.key} value={p.key} className="bg-white dark:bg-[#111315] text-[#0F172A] dark:text-[#F5F7FA]">{p.name} ({nf.format(p.monthly_call_limit)}/mo)</option>
               ))}
             </select>
           </div>
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">Custom allowance (calls / month)</label>
+            <label className="block text-[11px] font-semibold uppercase tracking-[0.05em] text-[#64748B] dark:text-[#A1A1AA]">Custom allowance (calls / month)</label>
             <input
               type="number"
               min="0"
-              className="mt-1 w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
+              className={inputClass()}
               placeholder="Leave blank to use the plan default"
               value={allowance}
               onChange={(e) => setAllowance(e.target.value)}
             />
-            <p className="mt-1 text-xs text-gray-400">Overrides the plan's allowance for this client only. Blank or 0 clears the override.</p>
+            <p className="mt-1 text-xs text-[#64748B] dark:text-[#A1A1AA]">Overrides the plan's allowance for this client only. Blank or 0 clears the override.</p>
           </div>
         </div>
       </Modal>

@@ -16,6 +16,7 @@ import {
 } from "../lib/appointmentFilters";
 import { useLabels, useClinicStore } from "../store/clinicStore";
 import { useAuthStore } from "../store/authStore";
+import { inputClass } from "../lib/inputStyles";
 
 const emptyForm = { patient_name: "", phone: "", appointment_at: "", duration_min: 30, reason: "" };
 const DURATIONS = [15, 30, 45, 60, 90];
@@ -678,17 +679,17 @@ export default function Appointments() {
         </div>
 
         {showFilters && (
-          <div className="grid gap-3 border-t border-gray-100 pt-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2">
-              <span className="block text-[10px] font-semibold uppercase tracking-wider text-gray-400">Status</span>
+          <div className="grid gap-3 border-t border-[#E4E8EE] dark:border-[#252A30] pt-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-[14px] border border-[#E4E8EE] dark:border-[#252A30] bg-[#F5F7FA] dark:bg-[#171A1D] px-3.5 py-2">
+              <span className="block text-[10px] font-semibold uppercase tracking-wider text-[#64748B] dark:text-[#A1A1AA]">Status</span>
               <select
-                className="mt-0.5 w-full border-0 bg-transparent p-0 text-sm text-gray-900 outline-none"
+                className="mt-0.5 w-full border-0 bg-transparent p-0 text-[13px] text-[#0F172A] dark:text-[#F5F7FA] outline-none"
                 value={statusFilter}
                 onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
                 aria-label="Filter by status"
               >
-                <option value="">All status</option>
-                {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                <option value="" className="bg-white dark:bg-[#111315] text-[#0F172A] dark:text-[#F5F7FA]">All status</option>
+                {statusOptions.map((s) => <option key={s} value={s} className="bg-white dark:bg-[#111315] text-[#0F172A] dark:text-[#F5F7FA]">{s}</option>)}
               </select>
             </div>
             {/* Doctor, type and source filters are deliberately absent: an appointment
@@ -790,18 +791,18 @@ export default function Appointments() {
         )}
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">Existing {labels.contact.toLowerCase()}</label>
+            <label className="block text-[11px] font-semibold uppercase tracking-[0.05em] text-[#64748B] dark:text-[#A1A1AA]">Existing {labels.contact.toLowerCase()}</label>
             <select
-              className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
+              className={inputClass()}
               value={selectedContactId}
               onChange={onSelectContact}
             >
-              <option value="">New {labels.contact.toLowerCase()} / walk-in</option>
+              <option value="" className="bg-white dark:bg-[#111315] text-[#0F172A] dark:text-[#F5F7FA]">New {labels.contact.toLowerCase()} / walk-in</option>
               {contacts.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}{c.phone ? ` — ${c.phone}` : ""}</option>
+                <option key={c.id} value={c.id} className="bg-white dark:bg-[#111315] text-[#0F172A] dark:text-[#F5F7FA]">{c.name}{c.phone ? ` — ${c.phone}` : ""}</option>
               ))}
             </select>
-            <p className="mt-1 text-xs text-gray-400">Pick a saved {labels.contact.toLowerCase()} to auto-fill their name and phone, or leave as "New" for a walk-in.</p>
+            <p className="mt-1 text-xs text-[#64748B] dark:text-[#A1A1AA]">Pick a saved {labels.contact.toLowerCase()} to auto-fill their name and phone, or leave as "New" for a walk-in.</p>
           </div>
           <Field label="Name *" value={form.patient_name} onChange={updateField("patient_name")} placeholder="Jane Doe" />
           <Field label="Phone (for WhatsApp)" value={form.phone} onChange={updateField("phone")} placeholder="+9198XXXXXXXX" />
@@ -809,13 +810,13 @@ export default function Appointments() {
             <>
               <Field label="Date & time *" type="datetime-local" value={form.appointment_at} onChange={updateField("appointment_at")} />
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">Length</label>
+                <label className="block text-[11px] font-semibold uppercase tracking-[0.05em] text-[#64748B] dark:text-[#A1A1AA]">Length</label>
                 <select
-                  className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
+                  className={inputClass()}
                   value={form.duration_min}
                   onChange={updateField("duration_min")}
                 >
-                  {DURATIONS.map((m) => <option key={m} value={m}>{m} min</option>)}
+                  {DURATIONS.map((m) => <option key={m} value={m} className="bg-white dark:bg-[#111315] text-[#0F172A] dark:text-[#F5F7FA]">{m} min</option>)}
                 </select>
               </div>
             </>
@@ -842,13 +843,13 @@ export default function Appointments() {
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="New date & time *" type="datetime-local" value={reAt} onChange={(e) => setReAt(e.target.value)} />
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">Length</label>
+            <label className="block text-[11px] font-semibold uppercase tracking-[0.05em] text-[#64748B] dark:text-[#A1A1AA]">Length</label>
             <select
-              className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
+              className={inputClass()}
               value={reDur}
               onChange={(e) => setReDur(e.target.value)}
             >
-              {DURATIONS.map((m) => <option key={m} value={m}>{m} min</option>)}
+              {DURATIONS.map((m) => <option key={m} value={m} className="bg-white dark:bg-[#111315] text-[#0F172A] dark:text-[#F5F7FA]">{m} min</option>)}
             </select>
           </div>
         </div>

@@ -244,7 +244,7 @@ export default function WhatsAppConfig({ settings, disabled = false, onSaved }) 
           <Label htmlFor="wa-lang">Template Language</Label>
           <select
             id="wa-lang"
-            className={`${inputClass()} bg-white`}
+            className={inputClass()}
             value={lang}
             onChange={(e) => setLang(e.target.value)}
             disabled={disabled || busy}
