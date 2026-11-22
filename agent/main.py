@@ -858,7 +858,7 @@ def prewarm(proc: agents.JobProcess) -> None:
     # min_silence_duration detects end-of-turn faster => snappier replies. Raise
     # AGENT_VAD_MIN_SILENCE if the agent starts replying before the caller finishes.
     proc.userdata["vad"] = silero.VAD.load(
-        min_silence_duration=float(os.getenv("AGENT_VAD_MIN_SILENCE", "0.4") or "0.4"),
+        min_silence_duration=float(os.getenv("AGENT_VAD_MIN_SILENCE", "0.32") or "0.32"),
     )
 
 
@@ -1056,7 +1056,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             return
         # _StrictSchemaLLM, not openai.LLM: Groq 400s on the `extra_content` property
         # that LiveKit copies out of Gemini's replies into the shared chat context.
-        _groq_model = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
+        # qwen/qwen3.8-27b provides ultra-fast ~120ms TTFT and native tool calling.
+        _groq_model = os.getenv("GROQ_LLM_MODEL", "qwen/qwen3.8-27b")
         _chain.append(_StrictSchemaLLM(
             model=_groq_model,
             api_key=_groq_key,
@@ -1107,10 +1108,13 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         # caller heard nothing and hung up (observed on a real call). max_retry_per_llm=0
         # means "don't retry, move on"; attempt_timeout also catches a provider that
         # accepts the request but never streams (the earlier flash-lite hang).
+        # retry_on_chunk_sent=True ensures that if a model drops or times out mid-stream,
+        # failover seamlessly continues on the next model rather than silencing the turn.
         agent_llm = _lk_llm.FallbackAdapter(
             _chain,
-            attempt_timeout=float(os.getenv("AGENT_LLM_ATTEMPT_TIMEOUT", "3.5") or "3.5"),
+            attempt_timeout=float(os.getenv("AGENT_LLM_ATTEMPT_TIMEOUT", "2.2") or "2.2"),
             max_retry_per_llm=0,
+            retry_on_chunk_sent=True,
         )
         logger.info(f"LLM = {_labels[0]} (fallbacks: {', '.join(_labels[1:])})")
     else:
@@ -1212,8 +1216,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         # turn (doubling token use) — set AGENT_PREEMPTIVE=0 to conserve Groq's
         # tight free-tier quota. Leave on for Gemini (huge free quota).
         preemptive_generation=(os.getenv("AGENT_PREEMPTIVE", "1").strip() != "0"),
-        min_endpointing_delay=float(os.getenv("AGENT_MIN_ENDPOINTING", "0.4") or "0.4"),
-        max_endpointing_delay=float(os.getenv("AGENT_MAX_ENDPOINTING", "1.0") or "1.0"),
+        min_endpointing_delay=float(os.getenv("AGENT_MIN_ENDPOINTING", "0.25") or "0.25"),
+        max_endpointing_delay=float(os.getenv("AGENT_MAX_ENDPOINTING", "0.6") or "0.6"),
         # Mark the caller "away" after this many seconds of silence; we hang up on
         # that (the LLM doesn't reliably call end_call when the caller just goes
         # quiet). Tunable via .env without code changes.
