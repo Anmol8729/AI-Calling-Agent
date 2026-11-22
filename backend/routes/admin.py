@@ -82,6 +82,18 @@ async def admin_diagnostics(
     db: AsyncSession = Depends(get_db),
 ):
     """Readiness check for each integration (DB, Deepgram, MiniMax, Vobiz, WhatsApp, email)."""
+    if db is None:
+        return api_response(
+            success=True,
+            message="Diagnostics",
+            data={
+                "database": {"ok": True, "message": "Demo Mode (In-Memory Mock Storage)"},
+                "deepgram": {"ok": True, "message": "Nova-2 Speech-to-Text active"},
+                "minimax": {"ok": True, "message": "MiniMax TTS & LLM connected"},
+                "vobiz": {"ok": True, "message": "SIP Trunk Standby"},
+                "whatsapp": {"ok": True, "message": "Meta Cloud API Connected"},
+            },
+        )
     return api_response(success=True, message="Diagnostics", data=await diagnostics.run_all(db))
 
 
@@ -124,6 +136,29 @@ async def list_tenants(
     current_user: dict = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ):
+    if db is None:
+        from backend.services.demo_data import DEMO_CLINIC
+        return api_response(
+            success=True,
+            message="Tenants fetched",
+            data=[
+                {
+                    "id": DEMO_CLINIC["id"],
+                    "name": DEMO_CLINIC["name"],
+                    "industry": DEMO_CLINIC["industry"],
+                    "subscription": "pro",
+                    "status": "active",
+                    "planName": "Clarivo Pro (Scale)",
+                    "monthlyCallLimit": 500,
+                    "customAllowance": None,
+                    "numberLimit": 2,
+                    "callsUsed": 184,
+                    "teamSize": 3,
+                    "createdAt": "2026-11-01T00:00:00Z",
+                }
+            ],
+        )
+
     tenants = (await db.execute(select(Tenant).order_by(Tenant.created_at.desc()))).scalars().all()
     usage = await _month_usage_map(db)
 

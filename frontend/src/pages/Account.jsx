@@ -114,55 +114,55 @@ export default function Account() {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight text-gray-950">Account</h1>
-        <p className="mt-2 text-sm text-gray-500">Manage your profile and password.</p>
+    <div className="flex flex-col gap-5">
+      <div className="px-1 py-0.5">
+        <h1 className="text-[26px] font-semibold text-[#0F172A] dark:text-[#F5F7FA] tracking-tight leading-[32px]">Account</h1>
+        <p className="text-[13.5px] text-[#475569] dark:text-[#A1A1AA] mt-1 leading-[20px]">Manage your profile and password.</p>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <section className="panel rounded-3xl p-6 space-y-4 border border-gray-100 bg-white shadow-sm">
-          <div className="flex items-center gap-2 border-b border-gray-100 pb-3">
-            <UserCog className="h-5 w-5 text-gray-500" />
-            <h2 className="text-lg font-semibold text-gray-950">Profile</h2>
+      <div className="grid gap-4 md:grid-cols-2">
+        <section className="clarivo-panel p-5 space-y-4">
+          <div className="flex items-center gap-2 border-b border-[#E4E8EE] dark:border-[#252A30] pb-3">
+            <UserCog className="h-5 w-5 text-[#007BA7]" />
+            <h2 className="text-[18px] font-semibold text-[#0F172A] dark:text-[#F5F7FA]">Profile</h2>
           </div>
           <Banner msg={profileMsg} />
           <div className="space-y-3">
             <Labeled label="Name">
-              <input className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none" value={name} onChange={(e) => setName(e.target.value)} disabled={loading} />
+              <input className="w-full rounded-[12px] border border-[#E4E8EE] dark:border-[#252A30] bg-white dark:bg-[#111315] px-3.5 py-2 text-[13.5px] text-[#0F172A] dark:text-[#F5F7FA] focus:border-[#007BA7] focus:outline-none" value={name} onChange={(e) => setName(e.target.value)} disabled={loading} />
             </Labeled>
             <Labeled label="Email">
-              <input className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none bg-gray-50 text-gray-500" value={profile.email} disabled readOnly />
+              <input className="w-full rounded-[12px] border border-[#E4E8EE] dark:border-[#252A30] bg-[#F5F7FA] dark:bg-[#171A1D] px-3.5 py-2 text-[13.5px] text-[#64748B] dark:text-[#A1A1AA] cursor-default focus:outline-none" value={profile.email} disabled readOnly />
             </Labeled>
             <Labeled label="Role">
-              <input className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none bg-gray-50 text-gray-500 capitalize" value={profile.role} disabled readOnly />
+              <input className="w-full rounded-[12px] border border-[#E4E8EE] dark:border-[#252A30] bg-[#F5F7FA] dark:bg-[#171A1D] px-3.5 py-2 text-[13.5px] text-[#64748B] dark:text-[#A1A1AA] cursor-default focus:outline-none capitalize" value={profile.role} disabled readOnly />
             </Labeled>
           </div>
-          <div className="flex justify-end">
+          <div className="flex justify-end pt-2">
             <Button onClick={saveProfile} disabled={loading || savingProfile}>
               <Save className="h-4 w-4" /> {savingProfile ? "Saving..." : "Save profile"}
             </Button>
           </div>
         </section>
 
-        <section className="panel rounded-3xl p-6 space-y-4 border border-gray-100 bg-white shadow-sm">
-          <div className="flex items-center gap-2 border-b border-gray-100 pb-3">
-            <KeyRound className="h-5 w-5 text-gray-500" />
-            <h2 className="text-lg font-semibold text-gray-950">Change password</h2>
+        <section className="clarivo-panel p-5 space-y-4">
+          <div className="flex items-center gap-2 border-b border-[#E4E8EE] dark:border-[#252A30] pb-3">
+            <KeyRound className="h-5 w-5 text-[#007BA7]" />
+            <h2 className="text-[18px] font-semibold text-[#0F172A] dark:text-[#F5F7FA]">Change password</h2>
           </div>
           <Banner msg={pwdMsg} />
           <div className="space-y-3">
             <Labeled label="Current password">
-              <input type="password" className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+              <input type="password" className="w-full rounded-[12px] border border-[#E4E8EE] dark:border-[#252A30] bg-white dark:bg-[#111315] px-3.5 py-2 text-[13.5px] text-[#0F172A] dark:text-[#F5F7FA] focus:border-[#007BA7] focus:outline-none" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
             </Labeled>
             <Labeled label="New password">
-              <input type="password" className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+              <input type="password" className="w-full rounded-[12px] border border-[#E4E8EE] dark:border-[#252A30] bg-white dark:bg-[#111315] px-3.5 py-2 text-[13.5px] text-[#0F172A] dark:text-[#F5F7FA] focus:border-[#007BA7] focus:outline-none" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
             </Labeled>
             <Labeled label="Confirm new password">
-              <input type="password" className="w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+              <input type="password" className="w-full rounded-[12px] border border-[#E4E8EE] dark:border-[#252A30] bg-white dark:bg-[#111315] px-3.5 py-2 text-[13.5px] text-[#0F172A] dark:text-[#F5F7FA] focus:border-[#007BA7] focus:outline-none" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
             </Labeled>
           </div>
-          <div className="flex justify-end">
+          <div className="flex justify-end pt-2">
             <Button onClick={changePassword} disabled={savingPwd}>
               <KeyRound className="h-4 w-4" /> {savingPwd ? "Updating..." : "Update password"}
             </Button>
@@ -170,16 +170,13 @@ export default function Account() {
         </section>
       </div>
 
-      {/* Staff management used to be a form bolted onto the bottom of this page.
-          It now lives on its own /staff screen, which also lists existing staff and
-          can suspend or remove them — this page is about your own account. */}
       {isDoctor && (
-        <section className="panel flex flex-col gap-3 rounded-3xl border border-gray-100 bg-white p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-2">
-            <UserPlus className="mt-0.5 h-5 w-5 text-gray-500" />
+        <section className="clarivo-panel flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-2.5">
+            <UserPlus className="mt-0.5 h-5 w-5 text-[#007BA7]" />
             <div>
-              <h2 className="text-lg font-semibold text-gray-950">Staff</h2>
-              <p className="text-sm text-gray-500">
+              <h2 className="text-[18px] font-semibold text-[#0F172A] dark:text-[#F5F7FA]">Staff</h2>
+              <p className="text-[13px] text-[#64748B] dark:text-[#A1A1AA]">
                 Add a receptionist, suspend someone who has left, or remove an account.
               </p>
             </div>

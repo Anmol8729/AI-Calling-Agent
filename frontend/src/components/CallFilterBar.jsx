@@ -18,24 +18,24 @@ import { DURATION_RANGES } from "../lib/callFilters";
 /** A bordered control group: tiny caption above, borderless field inside. */
 function Group({ label, icon: Icon, children }) {
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2">
+    <div className="rounded-[14px] border border-[#E4E8EE] dark:border-[#252A30] bg-[#F5F7FA] dark:bg-[#171A1D] px-3 py-1.5">
       <div className="flex items-center gap-1.5">
-        {Icon && <Icon className="h-3 w-3 shrink-0 text-gray-400" />}
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">{label}</span>
+        {Icon && <Icon className="h-3 w-3 shrink-0 text-[#64748B] dark:text-[#A1A1AA]" />}
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-[#64748B] dark:text-[#A1A1AA]">{label}</span>
       </div>
       <div className="mt-0.5">{children}</div>
     </div>
   );
 }
 
-const FIELD = "w-full border-0 bg-transparent p-0 text-sm text-gray-900 outline-none placeholder:text-gray-400";
+const FIELD = "w-full border-0 bg-transparent p-0 text-[13px] text-[#0F172A] dark:text-[#F5F7FA] outline-none placeholder:text-[#64748B] dark:placeholder:text-[#A1A1AA]";
 
 export default function CallFilterBar({ value, onChange, onApply, onClear, statusOptions = [], disabled = false }) {
   const set = (patch) => onChange({ ...value, ...patch });
 
   return (
     <form
-      className="panel flex flex-col gap-3 rounded-3xl p-4 xl:flex-row xl:items-end"
+      className="clarivo-panel flex flex-col gap-3 p-4 xl:flex-row xl:items-end"
       onSubmit={(e) => { e.preventDefault(); onApply(); }}
       aria-label="Filter call history"
     >

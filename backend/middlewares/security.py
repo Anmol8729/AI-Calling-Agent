@@ -39,25 +39,36 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         headers.setdefault("X-Frame-Options", "DENY")
         headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
-        headers.setdefault("Cross-Origin-Resource-Policy", "same-site")
-        headers.setdefault(
-            "Permissions-Policy",
-            "geolocation=(), microphone=(), camera=(), payment=(), usb=()",
-        )
-        headers.setdefault(
-            "Content-Security-Policy",
-            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; "
-            "form-action 'none'; connect-src 'self' https://api.razorpay.com",
-        )
-        # Only meaningful over TLS, and sending it in local dev would pin
-        # http://localhost to https for the developer's whole browser profile.
-        if self._hsts:
-            headers.setdefault(
-                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
-            )
-        # Never let a proxy or browser cache an authenticated API response.
+        headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+
         if request.url.path.startswith("/api/"):
+            headers.setdefault(
+                "Permissions-Policy",
+                "geolocation=(), microphone=(), camera=(), payment=(), usb=()",
+            )
+            headers.setdefault(
+                "Content-Security-Policy",
+                "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; "
+                "form-action 'none'; connect-src 'self' https://api.razorpay.com",
+            )
             headers.setdefault("Cache-Control", "no-store")
+        else:
+            headers.setdefault(
+                "Permissions-Policy",
+                "geolocation=(), microphone=(self), camera=(), payment=(), usb=()",
+            )
+            headers.setdefault(
+                "Content-Security-Policy",
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' https://checkout.razorpay.com; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "font-src 'self' https://fonts.gstatic.com data:; "
+                "img-src 'self' data: https: blob:; "
+                "connect-src 'self' ws: wss: http: https:; "
+                "frame-src 'self' https://api.razorpay.com; "
+                "base-uri 'self'; "
+                "form-action 'self';",
+            )
         return response
 
 

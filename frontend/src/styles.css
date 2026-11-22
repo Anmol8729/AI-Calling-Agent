@@ -1,64 +1,92 @@
 @import "tailwindcss";
 
+/* Force Tailwind v4 dark: utilities to trigger on the .dark class (not media query) */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /*
- * Clarivo colour theme.
- *
- * The app writes Tailwind's `gray-*` utilities directly — 574 times across 37 files —
- * so the theme lives here rather than in the components: redefining the ramp recolours
- * every one of those usages at once. Nothing about the layout, spacing or component
- * structure changes.
- *
- * Tailwind v4 is configured in CSS, not tailwind.config.js. That file is left alone
- * because v4 ignores it (its `content` globs point at Next.js paths this Vite app does
- * not even have).
- *
- * The ramp stays monotonic light-to-dark so every existing pairing keeps the contrast it
- * was written for: text-gray-500 on bg-white, border-gray-200, hover:bg-gray-50 and so on
- * all still read the same way, just in navy instead of neutral grey.
- *
- * Status colours are deliberately absent: Tailwind's emerald-500, amber-500 and red-500
- * are already exactly #10B981, #F59E0B and #EF4444, so success, warning and error need no
- * override at all.
+ * Clarivo Precision Design System (Synced with Google Stitch)
+ * 
+ * Calm, precise, modern design system for Clarivo AI reception platform.
+ * Soft floating panels sit upon an atmospheric canvas (#EEF1F5 light / #0A0A0A dark),
+ * with crisp hairline borders, pure typography (Inter), and restrained purposeful color signaling:
+ * - Primary: Cerulean Blue (#007BA7)
+ * - Accent: Neon Rose (#FF2D95)
  */
 @theme {
-  /* ----- structural ramp: neutral grey -> Clarivo navy ----- */
-  --color-gray-50: #f7f9fc;  /* application background */
-  --color-gray-100: #eaf5ff; /* light blue accent fills */
-  --color-gray-200: #dfe8f3; /* borders and dividers   */
-  --color-gray-300: #c5d6e8;
-  --color-gray-400: #93a6c2; /* placeholders, muted icons */
-  --color-gray-500: #5f7395; /* secondary text         */
-  --color-gray-600: #4a5c7c;
-  --color-gray-700: #32435f;
-  --color-gray-800: #1a2a4a;
-  --color-gray-900: #09265a;
-  --color-gray-950: #071a3d; /* primary text           */
+  /* ----- Core Stitch Tokens ----- */
+  --color-cerulean: #007BA7;
+  --color-rose: #FF2D95;
+  --color-status-success: #22C55E;
+  --color-status-warning: #F59E0B;
+  --color-status-error: #EF4444;
 
-  /* ----- brand accents -----
-   * Electric blue is the primary action colour and 600 is its hover. Note 600 is
-   * LIGHTER than 500 here: the brand calls for #0063FA on hover, so the pair is
-   * deliberately in that order rather than darkening on hover as a ramp usually would.
-   * Cyan stays an accent, used in exactly one existing place (the waveform below). */
-  --color-brand-50: #eaf5ff;
-  --color-brand-500: #0054f5;
-  --color-brand-600: #0063fa;
-  --color-brand-cyan: #00c2fa;
+  /* ----- Light theme tokens ----- */
+  --color-light-canvas: #EEF1F5;
+  --color-light-surface: #FFFFFF;
+  --color-light-surface-subtle: #F5F7FA;
+  --color-light-border: #E4E8EE;
+  --color-light-text: #0F172A;
+  --color-light-text-muted: #64748B;
+  --color-light-primary: #007BA7;
+  --color-light-on-primary: #FFFFFF;
+  --color-light-accent: #FF2D95;
+  --color-light-on-accent: #232323;
 
-  /* ----- sidebar -----
-   * Its own scale because the sidebar is the one dark region in the app: the shared
-   * ramp has to keep working for dark-text-on-white everywhere else. */
-  --color-navy-900: #021438; /* sidebar background     */
-  --color-navy-800: #09265a; /* hover / hairlines on navy */
-  --color-navy-200: #b9cbe3; /* muted text and icons on navy */
-  --color-navy-100: #d5e1f2; /* inactive navigation text */
+  /* ----- Dark theme tokens ----- */
+  --color-dark-canvas: #0A0A0A;
+  --color-dark-surface: #111315;
+  --color-dark-surface-subtle: #171A1D;
+  --color-dark-border: #252A30;
+  --color-dark-text: #F5F7FA;
+  --color-dark-text-muted: #A1A1AA;
+  --color-dark-primary: #007BA7;
+  --color-dark-on-primary: #FFFFFF;
+  --color-dark-accent: #FF2D95;
+  --color-dark-on-accent: #232323;
+
+  /* ----- Monotonic Slate ramp matching Stitch ----- */
+  --color-gray-50: #F8FAFC;
+  --color-gray-100: #F1F5F9;
+  --color-gray-200: #E4E8EE;
+  --color-gray-300: #CBD5E1;
+  --color-gray-400: #94A3B8;
+  --color-gray-500: #64748B;
+  --color-gray-600: #475569;
+  --color-gray-700: #334155;
+  --color-gray-800: #1E293B;
+  --color-gray-900: #0F172A;
+  --color-gray-950: #020617;
+
+  /* ----- Brand scale (Cerulean + Neon Rose) ----- */
+  --color-brand-50: #E6F4F9;
+  --color-brand-100: #CEE9F3;
+  --color-brand-500: #007BA7;
+  --color-brand-600: #006B93;
+  --color-brand-accent: #FF2D95;
+
+  /* ----- Rail / Sidebar tokens ----- */
+  --color-navy-900: #111315;
+  --color-navy-800: #171A1D;
+  --color-navy-200: #A1A1AA;
+  --color-navy-100: #F5F7FA;
+
+  /* ----- Radii ----- */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-inner: 18px;
+  --radius-panel: 22px;
+  --radius-full: 9999px;
 }
 
 :root {
-  color: #071a3d;
-  background: #f7f9fc;
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+  color: #0F172A;
+  background-color: #EEF1F5;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+html.dark {
+  color: #F5F7FA;
+  background-color: #0A0A0A;
 }
 
 * {
@@ -69,6 +97,17 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  background-color: #EEF1F5;
+  color: #0F172A;
+}
+
+html.dark body {
+  background-color: #0A0A0A;
+  color: #F5F7FA;
+}
+
+html.dark #root {
+  background-color: #0A0A0A;
 }
 
 button,
@@ -78,69 +117,160 @@ textarea {
   font: inherit;
 }
 
-/* Shadow geometry unchanged; only the tint moves from slate to navy. */
+/* Clarivo Precision Floating Panels & Cards */
+.clarivo-panel {
+  background-color: #FFFFFF;
+  border: 1px solid #E4E8EE;
+  border-radius: 22px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+}
+
+html.dark .clarivo-panel {
+  background-color: #111315;
+  border-color: #252A30;
+  box-shadow: none;
+}
+
+.clarivo-card {
+  background-color: #FFFFFF;
+  border: 1px solid #E4E8EE;
+  border-radius: 18px;
+}
+
+html.dark .clarivo-card {
+  background-color: #111315;
+  border-color: #252A30;
+}
+
 .glass-card {
-  border: 1px solid rgb(255 255 255 / 0.72);
-  background: rgb(255 255 255 / 0.82);
-  box-shadow: 0 20px 60px rgb(2 20 56 / 0.08);
-  backdrop-filter: blur(18px);
+  border: 1px solid #E4E8EE;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  backdrop-filter: blur(16px);
+}
+
+html.dark .glass-card {
+  border-color: #252A30;
+  background: rgba(17, 19, 21, 0.85);
+  box-shadow: none;
 }
 
 .panel {
-  border: 1px solid rgb(223 232 243 / 0.9);
-  background: white;
-  box-shadow: 0 16px 44px rgb(2 20 56 / 0.06);
+  border: 1px solid #E4E8EE;
+  background-color: #FFFFFF;
+  border-radius: 22px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+}
+
+html.dark .panel {
+  border-color: #252A30;
+  background-color: #111315;
+  box-shadow: none;
 }
 
 .field {
   width: 100%;
-  border-radius: 0.875rem;
-  border: 1px solid #dfe8f3;
-  background: #ffffff;
-  padding: 0.75rem 0.875rem;
-  color: #071a3d;
+  border-radius: 12px;
+  border: 1px solid #E4E8EE;
+  background: #FFFFFF;
+  padding: 0.625rem 0.875rem;
+  color: #0F172A;
   outline: none;
-  transition:
-    border-color 150ms ease,
-    box-shadow 150ms ease,
-    background 150ms ease;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+html.dark .field {
+  border-color: #252A30;
+  background: #171A1D;
+  color: #F5F7FA;
 }
 
 .field::placeholder {
-  color: #93a6c2;
+  color: #94A3B8;
 }
 
-/* Electric blue, matching the `focus:border-brand-500` inputs elsewhere in the app, so
-   every field indicates focus the same way. */
+html.dark .field::placeholder {
+  color: #64748B;
+}
+
 .field:focus {
-  border-color: #0054f5;
-  box-shadow: 0 0 0 4px rgb(0 84 245 / 0.12);
+  border-color: #007BA7;
+  box-shadow: 0 0 0 3px rgba(0, 123, 167, 0.15);
 }
 
 .status-dot {
   width: 0.5rem;
   height: 0.5rem;
-  border-radius: 999px;
+  border-radius: 9999px;
   display: inline-block;
 }
 
-/* The landing page's voice waveform — an AI highlight, and the one element in the app
-   where cyan belongs. It was near-black before. */
+/* Neon Rose accent pill button */
+.btn-accent {
+  background-color: #FF2D95;
+  color: #FFFFFF;
+  border-radius: 9999px;
+  font-weight: 600;
+  transition: opacity 150ms ease, transform 100ms ease;
+  box-shadow: 0 1px 3px rgba(255, 45, 149, 0.25);
+}
+
+.btn-accent:hover {
+  opacity: 0.95;
+}
+
+/* Primary Cerulean pill button */
+.btn-primary {
+  background-color: #007BA7;
+  color: #FFFFFF;
+  border-radius: 9999px;
+  font-weight: 500;
+  transition: opacity 150ms ease;
+}
+
+.btn-primary:hover {
+  opacity: 0.92;
+}
+
+/* Outlined pill button */
+.btn-outline {
+  background-color: #FFFFFF;
+  border: 1px solid #E4E8EE;
+  color: #0F172A;
+  border-radius: 9999px;
+  font-weight: 500;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+html.dark .btn-outline {
+  background-color: #171A1D;
+  border-color: #252A30;
+  color: #F5F7FA;
+}
+
+.btn-outline:hover {
+  background-color: #F5F7FA;
+}
+
+html.dark .btn-outline:hover {
+  background-color: #20242A;
+}
+
+/* Waveform for voice preview */
 .wave-bar {
-  width: 4px;
-  border-radius: 999px;
-  background: #00c2fa;
+  width: 3.5px;
+  border-radius: 9999px;
+  background: #007BA7;
   animation: wave 900ms ease-in-out infinite;
 }
 
 @keyframes wave {
-  0%,
-  100% {
-    height: 12px;
-    opacity: 0.45;
+  0%, 100% {
+    height: 10px;
+    opacity: 0.4;
   }
   50% {
-    height: 34px;
+    height: 28px;
     opacity: 1;
   }
 }

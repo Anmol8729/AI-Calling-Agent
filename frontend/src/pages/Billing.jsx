@@ -128,10 +128,10 @@ export default function Billing() {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight text-gray-950">Plans</h1>
-        <p className="mt-2 text-sm text-gray-500">
+    <div className="flex flex-col gap-5">
+      <div className="px-1 py-0.5">
+        <h1 className="text-[26px] font-semibold text-[#0F172A] dark:text-[#F5F7FA] tracking-tight leading-[32px]">Plans</h1>
+        <p className="text-[13.5px] text-[#475569] dark:text-[#A1A1AA] mt-1 leading-[20px]">
           Plans are priced by monthly call volume. Your current plan and usage are on the Dashboard.
         </p>
       </div>
@@ -160,18 +160,22 @@ export default function Billing() {
             return (
               <article
                 key={p.key}
-                className={`panel flex flex-col rounded-3xl p-5 ${isCurrent ? "ring-2 ring-brand-500" : ""}`}
+                className={`clarivo-panel flex flex-col p-5 justify-between gap-4 ${isCurrent ? "border-[#007BA7] ring-1 ring-[#007BA7]" : ""}`}
               >
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-semibold text-gray-950">{p.name}</h3>
-                  {isCurrent && <Badge tone="dark">Current</Badge>}
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[16px] font-semibold text-[#0F172A] dark:text-[#F5F7FA]">{p.name}</h3>
+                    {isCurrent && <Badge tone="dark">Current</Badge>}
+                  </div>
+                  <div>
+                    <p className="text-[28px] font-semibold text-[#0F172A] dark:text-[#F5F7FA] tabular-nums tracking-tight leading-[34px]">{nf.format(p.monthly_call_limit)}</p>
+                    <p className="text-[12px] text-[#64748B] dark:text-[#A1A1AA]">calls / month</p>
+                  </div>
+                  <p className="text-[14px] font-semibold text-[#0F172A] dark:text-[#F5F7FA]">{formatPrice(p.price_inr)}</p>
+                  {p.description && <p className="text-[12.5px] leading-[18px] text-[#64748B] dark:text-[#A1A1AA]">{p.description}</p>}
                 </div>
-                <p className="mt-3 text-2xl font-semibold text-gray-950">{nf.format(p.monthly_call_limit)}</p>
-                <p className="text-xs text-gray-500">calls / month</p>
-                <p className="mt-3 text-sm font-medium text-gray-900">{formatPrice(p.price_inr)}</p>
-                {p.description && <p className="mt-2 text-xs leading-5 text-gray-500">{p.description}</p>}
                 {!isCurrent && (
-                  <div className="mt-4">
+                  <div className="mt-2">
                     {canPay ? (
                       <Button
                         className="w-full"

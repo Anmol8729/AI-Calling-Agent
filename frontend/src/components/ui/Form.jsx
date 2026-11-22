@@ -1,21 +1,9 @@
-/**
- * Section / Label / Hint / Field — the form primitives the settings screens share.
- *
- * These lived inside Setup.jsx as local helpers. They moved here when the WhatsApp
- * configuration grew into its own component: copying them would have meant two
- * definitions of the same input drifting apart, and the app's form styling is
- * exactly the thing that has to stay identical across screens.
- *
- * Every added prop is optional, so existing call sites keep their current
- * behaviour and appearance.
- */
-
 import { inputClass } from "../../lib/inputStyles";
 
 export function Section({ icon: Icon, iconTone, title, subtitle, action, children }) {
   return (
-    <section className="panel rounded-3xl border border-gray-100 bg-white p-6 shadow-sm space-y-4">
-      <div className="flex items-start justify-between gap-3 border-b border-gray-100 pb-3">
+    <section className="clarivo-panel p-5 space-y-4">
+      <div className="flex items-start justify-between gap-3 border-b border-[#E4E8EE] dark:border-[#252A30] pb-3">
         <div className="flex items-start gap-2.5">
           {Icon && (
             iconTone ? (
@@ -23,12 +11,12 @@ export function Section({ icon: Icon, iconTone, title, subtitle, action, childre
                 <Icon className="h-5 w-5" />
               </span>
             ) : (
-              <Icon className="mt-0.5 h-5 w-5 shrink-0 text-gray-500" />
+              <Icon className="mt-0.5 h-5 w-5 shrink-0 text-[#007BA7]" />
             )
           )}
           <div>
-            <h2 className="text-lg font-semibold text-gray-950">{title}</h2>
-            {subtitle && <p className="mt-0.5 text-sm text-gray-500">{subtitle}</p>}
+            <h2 className="text-[18px] font-semibold text-[#0F172A] dark:text-[#F5F7FA] leading-[24px]">{title}</h2>
+            {subtitle && <p className="mt-0.5 text-[12px] text-[#64748B] dark:text-[#A1A1AA]">{subtitle}</p>}
           </div>
         </div>
         {action}
@@ -42,7 +30,7 @@ export function Label({ children, htmlFor }) {
   return (
     <label
       htmlFor={htmlFor}
-      className="block text-xs font-semibold uppercase tracking-wider text-gray-500"
+      className="block text-[11px] font-semibold uppercase tracking-[0.05em] text-[#64748B] dark:text-[#A1A1AA]"
     >
       {children}
     </label>
@@ -50,14 +38,12 @@ export function Label({ children, htmlFor }) {
 }
 
 export function Hint({ children, id }) {
-  return <p id={id} className="mt-1 text-xs text-gray-400">{children}</p>;
+  return <p id={id} className="mt-1 text-[12px] text-[#64748B] dark:text-[#A1A1AA]">{children}</p>;
 }
 
-/** Inline validation message. role="alert" so a screen reader announces it when it
- *  appears, which a plain colour change never does. */
 export function FieldError({ children, id }) {
   return (
-    <p id={id} role="alert" className="mt-1 text-xs font-medium text-red-600">
+    <p id={id} role="alert" className="mt-1 text-xs font-medium text-[#EF4444]">
       {children}
     </p>
   );

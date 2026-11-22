@@ -1,33 +1,48 @@
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 
-export default function StatCard({ title, value, change, icon: Icon, tone = "dark", loading = false }) {
+export default function StatCard({ title, value, change, icon: Icon, tone = "light", loading = false }) {
   const positive = !String(change).startsWith("-");
-  const dark = tone === "dark";
+  const isDarkTone = tone === "dark";
 
   return (
-    <div className={`rounded-3xl p-5 ${dark ? "border border-brand-600 bg-brand-500 shadow-2xl shadow-gray-950/15" : "panel"}`}>
+    <div
+      className={`rounded-[22px] p-5 border transition-all ${
+        isDarkTone
+          ? "bg-[#007BA7] text-white border-[#007BA7] shadow-[0_2px_8px_rgba(0,123,167,0.25)]"
+          : "clarivo-panel"
+      }`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className={`text-sm ${dark ? "text-gray-400" : "text-gray-500"}`}>{title}</p>
-          {/* A shimmer reads as "loading"; a bare "…" reads as broken. */}
+          <p className={`text-[12px] font-medium ${isDarkTone ? "text-white/80" : "text-[#64748B] dark:text-[#A1A1AA]"}`}>
+            {title}
+          </p>
           {loading ? (
             <div
-              className={`mt-3 h-9 w-20 animate-pulse rounded-lg ${dark ? "bg-white/15" : "bg-gray-200/80"}`}
+              className={`mt-2 h-9 w-20 animate-pulse rounded-lg ${isDarkTone ? "bg-white/20" : "bg-[#E4E8EE] dark:bg-[#252A30]"}`}
               aria-hidden="true"
             />
           ) : (
-            <p className={`mt-3 text-3xl font-semibold tracking-tight ${dark ? "text-white" : "text-gray-950"}`}>{value}</p>
+            <p className={`mt-2 text-[28px] font-semibold tabular-nums tracking-tight ${isDarkTone ? "text-white" : "text-[#0F172A] dark:text-[#F5F7FA]"}`}>
+              {value}
+            </p>
           )}
         </div>
-        <div className={`grid h-11 w-11 place-items-center rounded-2xl ${dark ? "bg-white/10 text-white" : "bg-gray-100 text-gray-950"}`}>
+        <div
+          className={`grid h-10 w-10 place-items-center rounded-full ${
+            isDarkTone ? "bg-white/15 text-white" : "bg-[#007BA7]/10 text-[#007BA7]"
+          }`}
+        >
           <Icon className="h-5 w-5" />
         </div>
       </div>
-      {/* Trend row only renders when a `change` is supplied — otherwise the
-          wrapper alone would add empty space under every stat. */}
       {change ? (
-        <div className={`mt-5 flex items-center gap-2 text-sm ${positive ? "text-emerald-500" : "text-red-500"}`}>
-          {positive ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownRight className="h-4 w-4" />}
+        <div
+          className={`mt-3 flex items-center gap-1.5 text-[11.5px] font-semibold ${
+            positive ? "text-[#22C55E]" : "text-[#EF4444]"
+          }`}
+        >
+          {positive ? <ArrowUpRight className="h-3.5 w-3.5" /> : <ArrowDownRight className="h-3.5 w-3.5" />}
           <span>{change} vs last period</span>
         </div>
       ) : null}

@@ -35,7 +35,14 @@ function extractAuthError(err, fallback) {
 
 export const useAuthStore = create((set) => ({
   token: localStorage.getItem("token") || null,
-  user: JSON.parse(localStorage.getItem("user")) || null,
+  user: (() => {
+    try {
+      const u = localStorage.getItem("user");
+      return u && u !== "undefined" ? JSON.parse(u) : null;
+    } catch {
+      return null;
+    }
+  })(),
   isAuthenticated: !!localStorage.getItem("token"),
   loading: false,
   error: null,

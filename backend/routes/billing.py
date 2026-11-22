@@ -83,6 +83,29 @@ async def billing_summary(
     db: AsyncSession = Depends(get_db),
 ):
     clinic_id = to_uuid(current_user.get("clinic_id"))
+    from backend.services.demo_data import get_demo_billing, DEMO_CLINIC_ID
+    if db is None or str(clinic_id) == DEMO_CLINIC_ID:
+        b = get_demo_billing()
+        demo_summary = {
+            "plan": {
+                "key": b["plan"],
+                "name": b["plan_name"],
+                "priceInr": b["amount"],
+                "description": "500 calls/month with priority AI voice reception",
+                "customAllowance": False,
+            },
+            "usage": {
+                "monthlyCallLimit": b["minutes_limit"],
+                "callsUsed": b["minutes_used"],
+                "callsRemaining": b["minutes_limit"] - b["minutes_used"],
+                "percentUsed": round((b["minutes_used"] / b["minutes_limit"]) * 100, 1),
+                "periodStart": datetime.utcnow().strftime("%Y-%m-01T00:00:00"),
+                "periodLabel": datetime.utcnow().strftime("%B %Y"),
+            },
+            "paymentsEnabled": False,
+        }
+        return api_response(success=True, message="Billing summary fetched", data=demo_summary)
+
     if clinic_id is None:
         return api_response(success=False, message="No clinic associated with user", status_code=400)
 

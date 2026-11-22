@@ -11,34 +11,38 @@ export default function AppLayout() {
   const user = useAuthStore((s) => s.user);
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#ffffff_0,#f7f7f8_34%,#eef0f3_100%)]">
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <div className="lg:pl-72">
+    <div className="min-h-screen bg-[#EEF1F5] dark:bg-[#0A0A0A] text-[#0F172A] dark:text-[#F5F7FA] p-3 sm:p-4 lg:p-6 transition-colors duration-200">
+      <div className="max-w-[1440px] mx-auto flex flex-col gap-4">
+        {/* Floating Top Bar (Header) */}
         <Navbar onMenuClick={() => setSidebarOpen(true)} />
+
+        {/* Tenant Status Banners */}
         {user?.tenant_status === "pending" && !user?.is_superadmin && (
-          <div className="mx-4 mt-4 flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 sm:mx-6 lg:mx-8">
-            <Clock className="h-5 w-5 shrink-0 text-amber-600" />
+          <div className="flex items-center gap-3 rounded-[18px] border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900/50 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+            <Clock className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
             <div>
               <span className="font-semibold">Account Pending Approval:</span> Your business account is awaiting administrator review. Outbound calling and full access will be enabled once approved.
             </div>
           </div>
         )}
         {user?.tenant_status === "suspended" && !user?.is_superadmin && (
-          <div className="mx-4 mt-4 flex items-center gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 sm:mx-6 lg:mx-8">
-            <AlertTriangle className="h-5 w-5 shrink-0 text-rose-600" />
+          <div className="flex items-center gap-3 rounded-[18px] border border-rose-200 bg-rose-50 dark:bg-rose-950/30 dark:border-rose-900/50 px-4 py-3 text-sm text-rose-800 dark:text-rose-300">
+            <AlertTriangle className="h-5 w-5 shrink-0 text-rose-600 dark:text-rose-400" />
             <div>
               <span className="font-semibold">Account Suspended:</span> This business account has been suspended. Please contact platform support.
             </div>
           </div>
         )}
-        <main className="px-4 py-6 sm:px-6 lg:px-8">
-          {/* Pages are code-split, so a chunk may still be loading. Keeping this
-              boundary inside the layout means the sidebar and navbar stay put and
-              only the content area shows a skeleton — no full-page flash. */}
-          <Suspense fallback={<LoadingState />}>
-            <Outlet />
-          </Suspense>
-        </main>
+
+        {/* Body Area with Left Floating Rail & Main Content */}
+        <div className="flex gap-4 items-start w-full">
+          <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+          <main className="flex-1 flex flex-col gap-4 min-w-0">
+            <Suspense fallback={<LoadingState />}>
+              <Outlet />
+            </Suspense>
+          </main>
+        </div>
       </div>
     </div>
   );

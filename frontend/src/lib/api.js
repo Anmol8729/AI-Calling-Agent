@@ -1,9 +1,10 @@
 import axios from "axios";
 
 // Base URL of the FastAPI backend. Configurable via Vite env (frontend/.env).
-// Defaults to the backend's real port (8000) and MUST include the /api prefix.
+// Defaults to relative "/api" so requests automatically go to the current host
+// through Vite proxy or FastAPI static mount without cross-origin port mismatch.
 const baseURL = (
-  import.meta.env.VITE_API_URL || "http://localhost:8000/api"
+  import.meta.env.VITE_API_URL || "/api"
 ).replace(/\/+$/, "");
 
 const api = axios.create({ baseURL });

@@ -74,44 +74,48 @@ export default function ContactDetail() {
   if (error) {
     return (
       <div className="space-y-4">
-        <Link to="/contacts" className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-950"><ArrowLeft className="h-4 w-4" /> Back</Link>
-        <div className="rounded-2xl border border-red-100 bg-red-50 p-4 text-sm text-red-800">{error}</div>
+        <Link to="/contacts" className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#64748B] hover:text-[#0F172A] dark:text-[#A1A1AA] dark:hover:text-[#F5F7FA]">
+          <ArrowLeft className="h-3.5 w-3.5" /> Back
+        </Link>
+        <div className="rounded-[18px] border border-red-200/60 bg-red-50/70 dark:bg-red-950/20 dark:border-red-900/40 p-4 text-sm text-red-700 dark:text-red-400">{error}</div>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <Link to="/contacts" className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-950">
-        <ArrowLeft className="h-4 w-4" /> Back to {labels.contacts.toLowerCase()}
+      <Link to="/contacts" className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#64748B] hover:text-[#0F172A] dark:text-[#A1A1AA] dark:hover:text-[#F5F7FA]">
+        <ArrowLeft className="h-3.5 w-3.5" /> Back to {labels.contacts.toLowerCase()}
       </Link>
 
       {/* Contact card */}
-      <section className="panel rounded-3xl border border-gray-100 bg-white p-6 shadow-sm">
+      <section className="clarivo-panel p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-950">{loading ? "…" : (contact.name || "Contact")}</h1>
-            <div className="mt-2 flex flex-wrap gap-4 text-sm text-gray-600">
-              <span className="inline-flex items-center gap-1"><Phone className="h-4 w-4 text-gray-400" /> {contact.phone || "—"}</span>
-              <span className="inline-flex items-center gap-1"><Mail className="h-4 w-4 text-gray-400" /> {contact.email || "—"}</span>
+            <h1 className="text-2xl font-semibold tracking-tight text-[#0F172A] dark:text-[#F5F7FA]">
+              {loading ? "…" : (contact.name || "Contact")}
+            </h1>
+            <div className="mt-2.5 flex flex-wrap gap-4 text-xs font-medium text-[#64748B] dark:text-[#A1A1AA]">
+              <span className="inline-flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 text-[#007BA7]" /> {contact.phone || "—"}</span>
+              <span className="inline-flex items-center gap-1.5"><Mail className="h-3.5 w-3.5 text-[#007BA7]" /> {contact.email || "—"}</span>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone={(contact.history && contact.history.length > 0) ? "success" : "neutral"}>
               {(contact.history && contact.history.length > 0) ? "Returning" : "New"}
             </Badge>
-            <Badge tone={contact.source === "manual" ? "neutral" : "dark"}>
+            <Badge tone={contact.source === "manual" ? "neutral" : "cerulean"}>
               {contact.source === "manual" ? "Manual" : "Agent"}
             </Badge>
           </div>
         </div>
         {(contact.gender || contact.age || contact.follow_up_notes) && (
-          <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+          <div className="mt-5 grid gap-3 text-xs sm:grid-cols-2 pt-4 border-t border-[#E4E8EE] dark:border-[#252A30]">
             {(contact.gender || contact.age) && (
-              <div><span className="text-gray-500">Details: </span><span className="text-gray-900">{[contact.gender, contact.age ? `Age ${contact.age}` : null].filter(Boolean).join(", ")}</span></div>
+              <div><span className="text-[#64748B] dark:text-[#A1A1AA]">Details: </span><span className="font-medium text-[#0F172A] dark:text-[#F5F7FA]">{[contact.gender, contact.age ? `Age ${contact.age}` : null].filter(Boolean).join(", ")}</span></div>
             )}
             {contact.follow_up_notes && (
-              <div><span className="text-gray-500">Notes: </span><span className="text-gray-900">{contact.follow_up_notes}</span></div>
+              <div><span className="text-[#64748B] dark:text-[#A1A1AA]">Notes: </span><span className="font-medium text-[#0F172A] dark:text-[#F5F7FA]">{contact.follow_up_notes}</span></div>
             )}
           </div>
         )}
@@ -119,13 +123,13 @@ export default function ContactDetail() {
 
       {/* Appointments */}
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-gray-950">{labels.bookings}</h2>
+        <h2 className="text-base font-semibold text-[#0F172A] dark:text-[#F5F7FA]">{labels.bookings}</h2>
         <DataTable columns={apptColumns} rows={appts} loading={loading} emptyTitle={`No ${labels.bookings.toLowerCase()} yet`} />
       </section>
 
       {/* Calls */}
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-gray-950">Calls</h2>
+        <h2 className="text-base font-semibold text-[#0F172A] dark:text-[#F5F7FA]">Calls</h2>
         <DataTable columns={callColumns} rows={calls} loading={loading} emptyTitle="No calls yet" />
       </section>
 
@@ -141,16 +145,16 @@ export default function ContactDetail() {
               const isCaller = (turn.role || "").toLowerCase() === "user";
               return (
                 <div key={i} className={`flex ${isCaller ? "justify-start" : "justify-end"}`}>
-                  <div className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${isCaller ? "bg-gray-100 text-gray-900" : "bg-brand-500 text-white"}`}>
-                    <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider opacity-60">{isCaller ? "Caller" : "AI Receptionist"}</p>
-                    {turn.content}
+                  <div className={`max-w-[80%] rounded-[18px] px-4 py-2.5 text-xs ${isCaller ? "bg-[#F5F7FA] dark:bg-[#171A1D] text-[#0F172A] dark:text-[#F5F7FA] border border-[#E4E8EE] dark:border-[#252A30]" : "bg-[#007BA7] text-white shadow-sm"}`}>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider opacity-75">{isCaller ? "Caller" : "AI Receptionist"}</p>
+                    <p className="leading-relaxed">{turn.content}</p>
                   </div>
                 </div>
               );
             })}
           </div>
         ) : (
-          <p className="text-sm text-gray-400">No transcript.</p>
+          <p className="text-xs text-[#64748B] dark:text-[#A1A1AA]">No transcript.</p>
         )}
       </Modal>
     </div>

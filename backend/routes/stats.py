@@ -25,6 +25,10 @@ async def overview(
     db: AsyncSession = Depends(get_db),
 ):
     clinic_id = to_uuid(current_user.get("clinic_id"))
+    from backend.services.demo_data import get_demo_overview, DEMO_CLINIC_ID
+    if db is None or str(clinic_id) == DEMO_CLINIC_ID:
+        return api_response(success=True, message="Overview fetched", data=get_demo_overview())
+
     if clinic_id is None:
         return api_response(success=False, message="No clinic associated with user", status_code=400)
 
@@ -186,6 +190,10 @@ async def onboarding(
 ):
     """Setup checklist state for the tenant, derived from existing data."""
     clinic_id = to_uuid(current_user.get("clinic_id"))
+    from backend.services.demo_data import get_demo_onboarding, DEMO_CLINIC_ID
+    if db is None or str(clinic_id) == DEMO_CLINIC_ID:
+        return api_response(success=True, message="Onboarding state fetched", data=get_demo_onboarding())
+
     if clinic_id is None:
         return api_response(success=False, message="No clinic associated with user", status_code=400)
 

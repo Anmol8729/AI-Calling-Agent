@@ -206,64 +206,68 @@ export default function Calls() {
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div className="flex flex-col gap-4">
+      {/* 1. Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1 py-0.5">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-gray-950">Calls</h1>
-          <p className="mt-2 text-sm text-gray-500">Live calls happening now, and the full history handled by your AI receptionist.</p>
+          <h1 className="text-[26px] font-semibold text-[#0F172A] dark:text-[#F5F7FA] tracking-tight leading-tight">
+            Calls
+          </h1>
+          <p className="text-[13.5px] text-[#475569] dark:text-[#A1A1AA] mt-0.5">
+            Every conversation your AI receptionist handles, with who called and what happened.
+          </p>
         </div>
-        <Button variant="secondary" onClick={refresh} disabled={refreshing}>
-          <RefreshCw className="h-4 w-4" /> {refreshing ? "Refreshing..." : "Refresh"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={refresh} disabled={refreshing}>
+            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+            <span>{refreshing ? "Refreshing..." : "Refresh"}</span>
+          </Button>
+        </div>
       </div>
 
+      {/* 2. Stats Row */}
       <CallStatsRow stats={stats} loading={loading} />
 
-      {/* Live calls */}
+      {/* 3. Live calls */}
       <section className="space-y-3">
         <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
-            <Radio className="h-3 w-3" /> Live
+          <span className="flex items-center gap-1.5 rounded-full bg-[#22C55E]/10 text-[#22C55E] px-2.5 py-0.5 text-[11px] font-semibold">
+            <Radio className="h-3 w-3 animate-pulse" /> Live
           </span>
-          <h2 className="text-lg font-semibold text-gray-950">Happening now</h2>
+          <h2 className="text-[18px] font-semibold text-[#0F172A] dark:text-[#F5F7FA]">Happening now</h2>
         </div>
         {live.length === 0 ? (
-          <div className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-emerald-50/60 p-6">
+          <div className="clarivo-panel p-5 relative overflow-hidden">
             <div className="relative flex items-start gap-3">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-emerald-100 text-emerald-700">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#22C55E]/10 text-[#22C55E]">
                 <Radio className="h-4 w-4" />
               </span>
               <div>
-                <p className="text-sm font-semibold text-gray-950">
+                <p className="text-sm font-semibold text-[#0F172A] dark:text-[#F5F7FA]">
                   {loading ? "Checking for live calls…" : "No live calls right now"}
                 </p>
-                <p className="mt-0.5 text-sm text-emerald-900/60">
+                <p className="mt-0.5 text-xs text-[#64748B] dark:text-[#A1A1AA]">
                   You'll see active calls here as they happen.
                 </p>
               </div>
             </div>
-            {/* Decorative, and hidden on phones where it would sit under the text. */}
-            <Headphones
-              className="pointer-events-none absolute -bottom-4 right-5 hidden h-24 w-24 text-emerald-600/15 sm:block"
-              aria-hidden="true"
-            />
           </div>
         ) : (
           <div className="grid gap-4 xl:grid-cols-3">
             {live.map((call) => (
-              <article key={call.id} className="panel rounded-3xl p-5">
+              <article key={call.id} className="clarivo-card p-4">
                 <div className="flex items-start justify-between">
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-950">{call.caller}</h3>
-                    <p className="text-sm text-gray-500">{call.phone || "—"}</p>
+                    <h3 className="text-base font-semibold text-[#0F172A] dark:text-[#F5F7FA]">{call.caller}</h3>
+                    <p className="text-xs text-[#64748B] dark:text-[#A1A1AA]">{call.phone || "—"}</p>
                   </div>
-                  <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+                  <span className="flex items-center gap-1 rounded-full bg-[#22C55E]/10 px-2.5 py-0.5 text-[11px] font-semibold text-[#22C55E]">
                     <Radio className="h-3 w-3" /> Live
                   </span>
                 </div>
-                <div className="mt-4 space-y-1 text-sm text-gray-500">
-                  <p>Exchanges: <span className="text-gray-900">{call.turns}</span></p>
-                  <p>Started: <span className="text-gray-900">{call.startedAt ? new Date(call.startedAt).toLocaleTimeString() : "—"}</span></p>
+                <div className="mt-3 space-y-1 text-xs text-[#64748B] dark:text-[#A1A1AA]">
+                  <p>Exchanges: <span className="font-semibold text-[#0F172A] dark:text-[#F5F7FA]">{call.turns}</span></p>
+                  <p>Started: <span className="font-semibold text-[#0F172A] dark:text-[#F5F7FA]">{call.startedAt ? new Date(call.startedAt).toLocaleTimeString() : "—"}</span></p>
                 </div>
               </article>
             ))}
@@ -271,7 +275,7 @@ export default function Calls() {
         )}
       </section>
 
-      {/* Filters sit above the Call history heading, matching the reference. */}
+      {/* 4. Filters */}
       <CallFilterBar
         value={draft}
         onChange={setDraft}
@@ -281,32 +285,30 @@ export default function Calls() {
         disabled={loading}
       />
 
-      {/* Call history */}
+      {/* 5. Call history */}
       <section className="space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-gray-950">Call history</h2>
-            <p className="mt-0.5 text-sm text-gray-500">
+            <h2 className="text-[18px] font-semibold text-[#0F172A] dark:text-[#F5F7FA]">Call history</h2>
+            <p className="mt-0.5 text-xs text-[#64748B] dark:text-[#A1A1AA]">
               Browse and review all calls handled by your AI receptionist.
             </p>
-            {/* Without this, a filter that matches few rows is indistinguishable from a
-                tenant who has barely taken any calls. */}
             {filtersActive && !loading && (
-              <p className="mt-1 text-xs text-gray-500" aria-live="polite">
+              <p className="mt-1 text-xs text-[#007BA7] font-medium" aria-live="polite">
                 {filtered.length} of {logs.length} calls match
               </p>
             )}
           </div>
-          <label className="flex items-center gap-2.5 rounded-2xl border border-gray-200 bg-white px-3 py-2 sm:w-80">
-            <Search className="h-4 w-4 shrink-0 text-gray-400" />
+          <div className="relative sm:w-80">
+            <Search className="h-4 w-4 text-[#64748B] dark:text-[#A1A1AA] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
-              className="w-full border-0 bg-transparent p-0 text-sm outline-none placeholder:text-gray-400"
+              className="h-10 w-full pl-10 pr-4 rounded-full border border-[#E4E8EE] dark:border-[#252A30] bg-[#F5F7FA] dark:bg-[#171A1D] text-[13px] text-[#0F172A] dark:text-[#F5F7FA] placeholder-[#64748B] outline-none focus:ring-2 focus:ring-[#007BA7] transition-colors"
               placeholder="Search by caller, phone, or outcome..."
               value={query}
               onChange={(e) => changeQuery(e.target.value)}
               aria-label="Search calls"
             />
-          </label>
+          </div>
         </div>
         <DataTable
           columns={columns}
