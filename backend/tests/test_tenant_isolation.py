@@ -160,6 +160,31 @@ async def _release_test_numbers():
     await close_db_connection()
 
 
+async def _activate_tenants(clinic_ids):
+    """Approve probe tenants so tests can access tenant-isolated resources.
+
+    Since migration 20261013_0200, newly registered non-superadmin accounts start
+    in status='pending'. The isolation suite needs active tenants to test cross-tenant
+    boundaries.
+    """
+    from sqlalchemy import update
+    from backend.models import Tenant
+    from backend.services.db import close_db_connection, connect_to_db, get_sessionmaker
+    from backend.utils.helpers import to_uuid
+
+    await connect_to_db()
+    Session = get_sessionmaker()
+    async with Session() as session:
+        for cid in clinic_ids:
+            uid = to_uuid(cid)
+            if uid:
+                await session.execute(
+                    update(Tenant).where(Tenant.id == uid).values(status="active")
+                )
+        await session.commit()
+    await close_db_connection()
+
+
 @pytest.fixture(scope="module")
 def two_tenants(api):
     import asyncio
@@ -168,6 +193,8 @@ def two_tenants(api):
     asyncio.run(_release_test_numbers())
     a, b = Tenant(api, "a"), Tenant(api, "b")
     assert a.clinic_id != b.clinic_id, "each signup must create its own tenant"
+    # Approve both probe clinics so they can access clinic endpoints
+    asyncio.run(_activate_tenants([a.clinic_id, b.clinic_id]))
     try:
         yield a, b
     finally:
