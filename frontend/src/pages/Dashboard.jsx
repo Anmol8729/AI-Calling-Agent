@@ -120,21 +120,16 @@ export default function Dashboard() {
       {/* 1. WELCOME ROW (Title + Time filter pill)                       */}
       {/* ============================================================== */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1 py-0.5">
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-white dark:bg-[#111315] border border-[#E4E8EE] dark:border-[#252A30] flex items-center justify-center p-2 shadow-[0_1px_3px_rgba(15,23,42,0.03)] shrink-0">
-            <img src="/logo-icon.png" alt="Clarivo Logo" className="w-full h-full object-contain" />
-          </div>
-          <div>
-            <h1 className="text-[26px] font-semibold text-[#0F172A] dark:text-[#F5F7FA] tracking-tight leading-tight">
-              Welcome back, {userName}
-            </h1>
-            <p className="text-[13.5px] text-[#475569] dark:text-[#A1A1AA] mt-0.5">
-              Your AI reception center is running smoothly today.{" "}
-              <span className="text-[#0F172A] dark:text-[#F5F7FA] font-semibold">
-                {todayDateString}
-              </span>
-            </p>
-          </div>
+        <div>
+          <h1 className="text-[26px] font-semibold text-[#0F172A] dark:text-[#F5F7FA] tracking-tight leading-tight">
+            Welcome back, {userName}
+          </h1>
+          <p className="text-[13.5px] text-[#475569] dark:text-[#A1A1AA] mt-0.5">
+            Your AI reception center is running smoothly today.{" "}
+            <span className="text-[#0F172A] dark:text-[#F5F7FA] font-semibold">
+              {todayDateString}
+            </span>
+          </p>
         </div>
 
         <div className="flex items-center gap-3">

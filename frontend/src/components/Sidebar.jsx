@@ -88,21 +88,13 @@ export default function Sidebar({ open, onClose }) {
       {/* 1. DESKTOP FLOATING ICON RAIL (56px / w-14)                     */}
       {/* ============================================================== */}
       <aside className="hidden lg:flex w-14 flex-shrink-0 flex-col gap-3 sticky top-4 z-20">
-        {/* Top panel: Brand mark + Theme toggle */}
-        <div className="w-14 p-1.5 bg-white dark:bg-[#111315] border border-[#E4E8EE] dark:border-[#252A30] rounded-[22px] flex flex-col items-center gap-1 shadow-[0_1px_3px_rgba(15,23,42,0.03)]">
-          <NavLink
-            to="/dashboard"
-            title="Clarivo Home"
-            className="w-10 h-10 rounded-full flex items-center justify-center transition-transform hover:scale-105 p-1"
-          >
-            <img src="/logo-icon.png" alt="Clarivo Logo" className="w-full h-full object-contain" />
-          </NavLink>
-          <div className="w-6 h-[1px] bg-[#E4E8EE] dark:bg-[#252A30] my-0.5" />
+        {/* Top panel: Theme toggle */}
+        <div className="w-14 p-1.5 bg-white dark:bg-[#111315] border border-[#E4E8EE] dark:border-[#252A30] rounded-[22px] flex flex-col items-center shadow-[0_1px_3px_rgba(15,23,42,0.03)]">
           <button
             type="button"
             onClick={toggleTheme}
             title={theme === "dark" ? "Switch to Light mode" : "Switch to Dark mode"}
-            className="w-10 h-10 rounded-full flex items-center justify-center transition-colors text-[#64748B] dark:text-[#A1A1AA] hover:text-[#0F172A] dark:hover:text-[#F5F7FA] hover:bg-[#F5F7FA] dark:hover:bg-[#171A1D]"
+            className="w-10 h-10 rounded-full flex items-center justify-center transition-colors text-[#64748B] dark:text-[#A1A1AA] hover:text-[#0F172A] dark:hover:text-[#F5F7FA] hover:bg-[#F5F7FA] dark:hover:bg-[#171A1D] cursor-pointer"
           >
             {theme === "dark" ? (
               <Sun className="h-[19px] w-[19px] text-[#007BA7]" />

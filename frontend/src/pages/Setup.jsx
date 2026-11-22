@@ -6,6 +6,7 @@ import {
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
 import { Section, Label, Hint, Field } from "../components/ui/Form";
+import { inputClass } from "../lib/inputStyles";
 import WhatsAppConfig from "../components/WhatsAppConfig";
 import SipConnectionCard from "../components/SipConnectionCard";
 import Modal from "../components/Modal";
@@ -192,12 +193,12 @@ export default function Setup() {
       <Section icon={CalendarPlus} title="Booking">
         <Label>How you book appointments</Label>
         <select
-          className="mt-1 w-full max-w-sm rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
+          className={`${inputClass()} max-w-sm`}
           value={bookingMode}
           onChange={(e) => setBookingMode(e.target.value)}
         >
-          <option value="time">Time slots — fixed appointment times</option>
-          <option value="token">Token queue — daily number, no fixed time</option>
+          <option value="time" className="bg-white dark:bg-[#111315] text-[#0F172A] dark:text-[#F5F7FA]">Time slots — fixed appointment times</option>
+          <option value="token" className="bg-white dark:bg-[#111315] text-[#0F172A] dark:text-[#F5F7FA]">Token queue — daily number, no fixed time</option>
         </select>
         <Hint>Token queue suits businesses that serve people by a daily number instead of exact times — callers are told their token number. Your Appointments page and the assistant adapt automatically.</Hint>
       </Section>
@@ -206,11 +207,15 @@ export default function Setup() {
       <Section icon={Languages} title="Language">
         <Label>Language your callers speak</Label>
         <select
-          className="mt-1 w-full max-w-sm rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
+          className={`${inputClass()} max-w-sm`}
           value={language || "hi"}
           onChange={(e) => setLanguage(e.target.value)}
         >
-          {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
+          {LANGUAGES.map((l) => (
+            <option key={l.code} value={l.code} className="bg-white dark:bg-[#111315] text-[#0F172A] dark:text-[#F5F7FA]">
+              {l.label}
+            </option>
+          ))}
         </select>
         <Hint>Drives what the assistant understands and the voice it speaks in.</Hint>
       </Section>
@@ -219,20 +224,26 @@ export default function Setup() {
       <Section icon={Mic2} title="Voice">
         <Label>Assistant voice</Label>
         <select
-          className="mt-1 w-full max-w-sm rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
+          className={`${inputClass()} max-w-sm`}
           value={voiceCustom ? "__custom__" : (voice || "Calm_Woman")}
           onChange={(e) => {
             if (e.target.value === "__custom__") { setVoiceCustom(true); setVoice(""); }
             else { setVoiceCustom(false); setVoice(e.target.value); }
           }}
         >
-          {VOICES.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
-          <option value="__custom__">Custom / cloned voice…</option>
+          {VOICES.map((v) => (
+            <option key={v.id} value={v.id} className="bg-white dark:bg-[#111315] text-[#0F172A] dark:text-[#F5F7FA]">
+              {v.label}
+            </option>
+          ))}
+          <option value="__custom__" className="bg-white dark:bg-[#111315] text-[#0F172A] dark:text-[#F5F7FA]">
+            Custom / cloned voice…
+          </option>
         </select>
         {voiceCustom && (
           <input
             type="text"
-            className="mt-2 w-full max-w-sm rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
+            className={`${inputClass()} max-w-sm`}
             value={voice}
             onChange={(e) => setVoice(e.target.value)}
             placeholder="Paste your cloned voice ID"
@@ -246,7 +257,7 @@ export default function Setup() {
         <Label>Business information</Label>
         <textarea
           rows={12}
-          className="mt-1 w-full rounded-2xl border border-gray-200 p-4 text-sm leading-6 focus:border-brand-500 focus:outline-none"
+          className={`${inputClass()} p-4 text-sm leading-6 resize-y`}
           placeholder={KB_PLACEHOLDER}
           value={knowledge}
           onChange={(e) => setKnowledge(e.target.value)}
@@ -262,7 +273,7 @@ export default function Setup() {
           <Label>How your assistant should behave</Label>
           <textarea
             rows={5}
-            className="mt-1 w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
+            className={`${inputClass()} resize-y`}
             value={behavior}
             onChange={(e) => setBehavior(e.target.value)}
             placeholder="You are a warm, professional receptionist for a business. Book appointments and answer questions using the business information..."

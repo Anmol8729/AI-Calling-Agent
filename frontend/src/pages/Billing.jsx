@@ -5,6 +5,7 @@ import StatCard from "../components/StatCard";
 import Modal from "../components/Modal";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
+import { inputClass } from "../lib/inputStyles";
 import { useLabels } from "../store/clinicStore";
 import { useBillingStore, useBillingSummary } from "../store/billingStore";
 import { nf, formatPrice } from "../lib/money";
@@ -231,10 +232,10 @@ export default function Billing() {
           </div>
         }
       >
-        <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">Note (optional)</label>
+        <label className="block text-[11px] font-semibold uppercase tracking-[0.05em] text-[#64748B] dark:text-[#A1A1AA]">Note (optional)</label>
         <textarea
           rows={3}
-          className="mt-1 w-full rounded-xl border border-gray-200 px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
+          className={`${inputClass()} resize-y`}
           placeholder="Anything we should know (expected call volume, timeline, etc.)"
           value={note}
           onChange={(e) => setNote(e.target.value)}
