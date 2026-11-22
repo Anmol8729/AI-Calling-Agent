@@ -186,27 +186,29 @@ export default function Admin() {
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-2">
-        <ShieldCheck className="h-6 w-6 text-gray-700" />
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-gray-950">Admin</h1>
-          <p className="mt-1 text-sm text-gray-500">Assign plans and custom call allowances for each client.</p>
+    <div className="flex flex-col gap-5">
+      <div className="px-1 py-0.5">
+        <div className="flex items-center gap-2.5">
+          <ShieldCheck className="h-6 w-6 text-[#007BA7]" />
+          <h1 className="text-[26px] font-semibold text-[#0F172A] dark:text-[#F5F7FA] tracking-tight leading-[32px]">Admin</h1>
         </div>
+        <p className="text-[13.5px] text-[#475569] dark:text-[#A1A1AA] mt-1 leading-[20px]">
+          Assign plans and custom call allowances for each client.
+        </p>
       </div>
 
       {banner && (
-        <div className="flex items-start justify-between gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-800">
+        <div className="flex items-start justify-between gap-3 rounded-[14px] border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 p-4 text-sm text-emerald-800 dark:text-emerald-300">
           <span>{banner.text}</span>
           <button className="text-xs font-medium opacity-70 hover:opacity-100" onClick={() => setBanner(null)}>Dismiss</button>
         </div>
       )}
 
-      <section className="panel rounded-3xl p-5">
+      <section className="clarivo-panel p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-gray-950">System diagnostics</h2>
-            <p className="mt-1 text-sm text-gray-500">Check that each integration is configured and reachable before going live.</p>
+            <h2 className="text-[18px] font-semibold text-[#0F172A] dark:text-[#F5F7FA]">System diagnostics</h2>
+            <p className="text-[13px] text-[#64748B] dark:text-[#A1A1AA] mt-0.5">Check that each integration is configured and reachable before going live.</p>
           </div>
           <Button variant="secondary" onClick={runDiagnostics} disabled={diagLoading}>
             <Activity className="h-4 w-4" /> {diagLoading ? "Checking..." : "Run checks"}
@@ -215,10 +217,10 @@ export default function Admin() {
         {diag.length > 0 && (
           <ul className="mt-4 space-y-2">
             {diag.map((c) => (
-              <li key={c.name} className="flex items-start justify-between gap-3 rounded-2xl border border-gray-100 p-3">
+              <li key={c.name} className="flex items-start justify-between gap-3 rounded-[14px] border border-[#E4E8EE] dark:border-[#252A30] p-3">
                 <div>
-                  <p className="text-sm font-medium text-gray-950">{c.name}</p>
-                  <p className="text-xs text-gray-500">{c.detail}</p>
+                  <p className="text-sm font-medium text-[#0F172A] dark:text-[#F5F7FA]">{c.name}</p>
+                  <p className="text-xs text-[#64748B] dark:text-[#A1A1AA]">{c.detail}</p>
                 </div>
                 <Badge tone={c.status === "ok" ? "success" : c.status === "warn" ? "warning" : "danger"}>{c.status}</Badge>
               </li>

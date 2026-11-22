@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Bot, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import api from "../lib/api";
 
 export default function ResetPassword() {
@@ -40,47 +40,48 @@ export default function ResetPassword() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12">
-      <div className="w-full max-w-md space-y-8 rounded-3xl border border-gray-200 bg-white p-8 shadow-xl shadow-gray-900/5">
+    <div className="flex min-h-screen items-center justify-center bg-[#EEF1F5] dark:bg-[#0A0A0A] px-4 py-12">
+      <div className="w-full max-w-md space-y-7 clarivo-panel p-8 shadow-xl">
         <div className="flex flex-col items-center">
-          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-500 text-white shadow-lg shadow-gray-950/20">
-            <Bot className="h-6 w-6" />
+          <div className="flex items-center justify-center mb-2">
+            <img src="/logo-light.png" alt="Clarivo" className="h-10 w-auto object-contain dark:hidden" />
+            <img src="/logo-dark.png" alt="Clarivo" className="h-10 w-auto object-contain hidden dark:block" />
           </div>
-          <h2 className="mt-6 text-center text-3xl font-semibold tracking-tight text-gray-950">Set a new password</h2>
-          <p className="mt-2 text-center text-sm text-gray-500">Choose a strong password for your account.</p>
+          <h2 className="mt-2 text-center text-2xl font-semibold tracking-tight text-[#0F172A] dark:text-[#F5F7FA]">Set a new password</h2>
+          <p className="mt-1.5 text-center text-xs text-[#64748B] dark:text-[#A1A1AA]">Choose a strong password for your account.</p>
         </div>
 
         {done ? (
           <div className="space-y-6">
-            <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-800">
+            <div className="rounded-[18px] border border-emerald-200/60 bg-emerald-50/70 dark:bg-emerald-950/20 dark:border-emerald-900/40 p-4 text-xs font-medium text-emerald-800 dark:text-emerald-300">
               Password set successfully. You can now sign in.
             </div>
-            <Link to="/login" className="block text-center text-sm font-semibold text-gray-950 hover:underline">
+            <Link to="/login" className="block text-center text-xs font-semibold uppercase tracking-wider text-[#007BA7] hover:underline">
               Go to sign in
             </Link>
           </div>
         ) : (
-          <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-            {error && <div className="rounded-2xl border border-red-100 bg-red-50 p-4 text-sm text-red-600">{error}</div>}
+          <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
+            {error && <div className="rounded-[18px] border border-red-200/60 bg-red-50/70 dark:bg-red-950/20 dark:border-red-900/40 p-4 text-xs font-medium text-red-700 dark:text-red-400">{error}</div>}
             <div>
-              <label htmlFor="new-password" className="text-sm font-medium text-gray-700">New password</label>
+              <label htmlFor="new-password" className="block text-xs font-medium text-[#64748B] dark:text-[#A1A1AA] mb-1.5">New password</label>
               <input
                 id="new-password"
                 type="password"
                 required
-                className="mt-1 block w-full rounded-2xl border border-gray-200 px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:text-sm"
+                className="block w-full rounded-[12px] border border-[#E4E8EE] dark:border-[#252A30] bg-[#FFFFFF] dark:bg-[#171A1D] px-3.5 py-2.5 text-xs text-[#0F172A] dark:text-[#F5F7FA] placeholder-[#64748B] dark:placeholder-[#A1A1AA] focus:border-[#007BA7] focus:outline-none focus:ring-1 focus:ring-[#007BA7]"
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
             <div>
-              <label htmlFor="confirm-password" className="text-sm font-medium text-gray-700">Confirm new password</label>
+              <label htmlFor="confirm-password" className="block text-xs font-medium text-[#64748B] dark:text-[#A1A1AA] mb-1.5">Confirm new password</label>
               <input
                 id="confirm-password"
                 type="password"
                 required
-                className="mt-1 block w-full rounded-2xl border border-gray-200 px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:text-sm"
+                className="block w-full rounded-[12px] border border-[#E4E8EE] dark:border-[#252A30] bg-[#FFFFFF] dark:bg-[#171A1D] px-3.5 py-2.5 text-xs text-[#0F172A] dark:text-[#F5F7FA] placeholder-[#64748B] dark:placeholder-[#A1A1AA] focus:border-[#007BA7] focus:outline-none focus:ring-1 focus:ring-[#007BA7]"
                 placeholder="••••••••"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
@@ -89,12 +90,12 @@ export default function ResetPassword() {
             <button
               type="submit"
               disabled={loading}
-              className="flex w-full justify-center rounded-2xl bg-brand-500 px-4 py-3 text-sm font-semibold text-white shadow hover:bg-brand-600 disabled:opacity-50"
+              className="flex w-full justify-center rounded-full bg-[#007BA7] px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-[#00668A] disabled:opacity-50 transition"
             >
-              {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Set password"}
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Set password"}
             </button>
-            <p className="text-center text-sm text-gray-500">
-              <Link to="/login" className="font-semibold text-gray-950 hover:underline">Back to sign in</Link>
+            <p className="text-center text-xs text-[#64748B] dark:text-[#A1A1AA]">
+              <Link to="/login" className="font-semibold text-[#007BA7] hover:underline">Back to sign in</Link>
             </p>
           </form>
         )}

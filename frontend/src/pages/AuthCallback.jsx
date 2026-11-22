@@ -79,36 +79,36 @@ export default function AuthCallback() {
   }, [loginWithGoogle, navigate]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12">
-      <div className="w-full max-w-md space-y-6 rounded-3xl border border-gray-200 bg-white p-8 text-center shadow-xl shadow-gray-900/5">
+    <div className="flex min-h-screen items-center justify-center bg-[#EEF1F5] dark:bg-[#0A0A0A] px-4 py-12">
+      <div className="w-full max-w-md space-y-6 clarivo-panel p-8 text-center shadow-xl">
         <div className="flex justify-center">
-          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-500 text-white shadow-lg shadow-gray-950/20">
+          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#007BA7] text-white shadow-lg shadow-[#007BA7]/20">
             <Bot className="h-6 w-6" />
           </div>
         </div>
 
         {error ? (
           <>
-            <h1 className="text-xl font-semibold text-gray-950">
+            <h1 className="text-xl font-semibold tracking-tight text-[#0F172A] dark:text-[#F5F7FA]">
               Couldn&apos;t finish signing in
             </h1>
-            <p className="text-sm text-red-600">{error}</p>
+            <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
             <button
               type="button"
               onClick={() => navigate("/login", { replace: true })}
-              className="w-full rounded-2xl bg-brand-500 px-4 py-3 text-sm font-semibold text-white shadow hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500"
+              className="w-full rounded-full bg-[#007BA7] px-4 py-2.5 text-xs font-semibold text-white shadow hover:bg-[#00668A] focus:outline-none focus:ring-2 focus:ring-[#007BA7] transition"
             >
               Back to sign in
             </button>
           </>
         ) : (
           <>
-            <h1 className="text-xl font-semibold text-gray-950">Signing you in…</h1>
-            <p className="text-sm text-gray-500">
+            <h1 className="text-xl font-semibold tracking-tight text-[#0F172A] dark:text-[#F5F7FA]">Signing you in…</h1>
+            <p className="text-xs text-[#64748B] dark:text-[#A1A1AA]">
               Finishing up with Google. This only takes a moment.
             </p>
             <Loader2
-              className="mx-auto h-6 w-6 animate-spin text-gray-400"
+              className="mx-auto h-6 w-6 animate-spin text-[#007BA7]"
               aria-label="Signing in"
             />
           </>

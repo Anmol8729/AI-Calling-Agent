@@ -292,7 +292,7 @@ export default function WhatsAppConfig({ settings, disabled = false, onSaved }) 
           Template names must match ones already approved in Meta Business Manager.
           Credentials are checked with WhatsApp before anything is saved.
         </p>
-        <Button onClick={submit} disabled={disabled || busy} className="shrink-0">
+        <Button variant="accent" onClick={submit} disabled={disabled || busy} className="shrink-0">
           {busy
             ? <><Loader2 className="h-4 w-4 animate-spin" /> Verifying…</>
             : <><PlugZap className="h-4 w-4" /> {connected ? "Re-verify & save" : "Verify & save"}</>}

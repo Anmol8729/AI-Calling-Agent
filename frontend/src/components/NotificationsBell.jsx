@@ -218,38 +218,36 @@ export default function NotificationsBell() {
         type="button"
         onClick={toggle}
         aria-label={unread > 0 ? `Notifications, ${unread} new` : "Notifications"}
-        className="relative grid h-10 w-10 place-items-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm transition hover:bg-gray-50"
+        className="relative grid h-10 w-10 place-items-center rounded-full border border-[#E4E8EE] dark:border-[#252A30] bg-white dark:bg-[#111315] text-[#64748B] dark:text-[#A1A1AA] hover:text-[#0F172A] dark:hover:text-[#F5F7FA] hover:bg-[#F5F7FA] dark:hover:bg-[#171A1D] shadow-sm transition-colors cursor-pointer"
       >
         <Bell className="h-4 w-4" />
         {unread > 0 && (
-          <span className="absolute -right-1 -top-1 grid h-5 min-w-[1.25rem] place-items-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
-            {unread > 9 ? "9+" : unread}
-          </span>
+          <span className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-[#FF2D95]" />
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl">
-          <div className="border-b border-gray-100 px-4 py-3">
-            <p className="text-sm font-semibold text-gray-950">Recent activity</p>
+        <div className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-[20px] border border-[#E4E8EE] dark:border-[#252A30] bg-white dark:bg-[#111315] shadow-xl">
+          <div className="border-b border-[#E4E8EE] dark:border-[#252A30] px-4 py-3">
+            <p className="text-sm font-semibold text-[#0F172A] dark:text-[#F5F7FA]">Recent activity</p>
           </div>
           {items.length === 0 ? (
-            <div className="px-4 py-6 text-center text-sm text-gray-400">No recent activity yet.</div>
+            <div className="px-4 py-6 text-center text-sm text-[#64748B] dark:text-[#A1A1AA]">No recent activity yet.</div>
           ) : (
-            <ul className="max-h-80 divide-y divide-gray-100 overflow-y-auto">
+            <ul className="max-h-80 divide-y divide-[#E4E8EE] dark:divide-[#252A30] overflow-y-auto">
               {items.map((n) => (
                 <li key={n.id}>
                   <Link
                     to={n.to}
                     onClick={() => setOpen(false)}
-                    className="flex items-start gap-3 px-4 py-3 transition hover:bg-gray-50"
+                    className="flex items-start gap-3 px-4 py-3 transition hover:bg-[#F5F7FA] dark:hover:bg-[#171A1D]"
                   >
-                    <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-gray-100 text-gray-700">
+                    <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#007BA7]/10 text-[#007BA7]">
                       {n.kind === "appointment" ? <CalendarCheck className="h-4 w-4" /> : <PhoneCall className="h-4 w-4" />}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-gray-900">{n.title}</span>
-                      <span className="block truncate text-xs text-gray-500">
+                      <span className="block truncate text-sm font-medium text-[#0F172A] dark:text-[#F5F7FA]">{n.title}</span>
+                      <span className="block truncate text-xs text-[#64748B] dark:text-[#A1A1AA]">
                         {n.meta ? `${n.meta} · ` : ""}
                         {timeAgo(n.ts)}
                       </span>

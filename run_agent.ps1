@@ -1,2 +1,7 @@
-Set-Location -Path "C:\Users\acer\Desktop\AI-Calling-Agent\agent"
-& ".\.venv\Scripts\python.exe" main.py dev
+Set-Location -Path "$PSScriptRoot\agent"
+if (Test-Path "$PSScriptRoot\agent\.venv\Scripts\python.exe") {
+    & "$PSScriptRoot\agent\.venv\Scripts\python.exe" main.py dev
+} else {
+    & "$PSScriptRoot\.venv\Scripts\python.exe" main.py dev
+}
+

@@ -35,17 +35,17 @@ export default function GoogleSignInButton({ label = "Continue with Google" }) {
     <div className="space-y-3">
       <div className="relative">
         <div className="absolute inset-0 flex items-center" aria-hidden="true">
-          <div className="w-full border-t border-gray-200" />
+          <div className="w-full border-t border-[#E4E8EE] dark:border-[#252A30]" />
         </div>
         <div className="relative flex justify-center">
-          <span className="bg-white px-3 text-xs uppercase tracking-wide text-gray-400">
+          <span className="bg-white dark:bg-[#111315] px-3 text-xs uppercase tracking-wider text-[#64748B] dark:text-[#A1A1AA]">
             or
           </span>
         </div>
       </div>
 
       {error && (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-xs text-red-600 dark:text-red-400">
           {error}
         </p>
       )}
@@ -54,13 +54,13 @@ export default function GoogleSignInButton({ label = "Continue with Google" }) {
         type="button"
         onClick={handleClick}
         disabled={busy}
-        className="flex w-full items-center justify-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-50"
+        className="flex w-full items-center justify-center gap-3 rounded-full border border-[#E4E8EE] dark:border-[#252A30] bg-[#FFFFFF] dark:bg-[#171A1D] px-4 py-2.5 text-xs font-semibold text-[#0F172A] dark:text-[#F5F7FA] shadow-sm transition hover:bg-[#F5F7FA] dark:hover:bg-[#202428] focus:outline-none focus:ring-2 focus:ring-[#007BA7] disabled:opacity-50"
       >
         {busy ? (
-          <Loader2 className="h-5 w-5 animate-spin" />
+          <Loader2 className="h-4 w-4 animate-spin" />
         ) : (
           /* Google's mark, inline so the button does not depend on a remote asset. */
-          <svg className="h-5 w-5" viewBox="0 0 24 24" aria-hidden="true">
+          <svg className="h-4 w-4" viewBox="0 0 24 24" aria-hidden="true">
             <path
               fill="#4285F4"
               d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1Z"

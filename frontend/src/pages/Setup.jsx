@@ -149,14 +149,14 @@ export default function Setup() {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight text-gray-950">Agent Setup</h1>
-        <p className="mt-2 text-sm text-gray-500">Everything your AI receptionist needs: your business info, how it talks, and your phone number.</p>
+    <div className="flex flex-col gap-4 max-w-[1100px] mx-auto w-full">
+      <div className="px-1 py-0.5">
+        <h1 className="text-[26px] font-semibold text-[#0F172A] dark:text-[#F5F7FA] tracking-tight leading-[32px]">Agent Setup</h1>
+        <p className="text-[13.5px] text-[#475569] dark:text-[#A1A1AA] mt-0.5">Everything your AI receptionist needs: your business info, how it talks, and your phone number.</p>
       </div>
 
       {status && (
-        <div className={`rounded-2xl border p-4 text-sm ${status.type === "success" ? "border-emerald-100 bg-emerald-50 text-emerald-800" : "border-red-100 bg-red-50 text-red-800"}`}>
+        <div className={`rounded-[14px] border p-4 text-sm ${status.type === "success" ? "border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-300" : "border-red-200 bg-red-50 dark:bg-red-950/20 text-red-800 dark:text-red-300"}`}>
           {status.text}
         </div>
       )}
@@ -167,7 +167,7 @@ export default function Setup() {
           <div className="flex-1">
             <Label>Your industry</Label>
             <select
-              className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm focus:border-brand-500 focus:outline-none"
+              className="mt-1 w-full rounded-[12px] border border-[#E4E8EE] dark:border-[#252A30] bg-white dark:bg-[#111315] px-3.5 py-2.5 text-[13.5px] text-[#0F172A] dark:text-[#F5F7FA] outline-none focus:ring-2 focus:ring-[#007BA7]"
               value={industry}
               onChange={(e) => setIndustry(e.target.value)}
             >
@@ -287,9 +287,9 @@ export default function Setup() {
           the per-provider env vars, so a model typed here was stored and ignored
           while the page still answered "Saved. Changes apply on the next call." */}
 
-      <div className="flex justify-end">
-        <Button onClick={handleSave} disabled={saving || loading}>
-          <Save className="h-4 w-4" /> {saving ? "Saving..." : "Save"}
+      <div className="flex justify-end pt-2">
+        <Button variant="accent" onClick={handleSave} disabled={saving || loading}>
+          <Save className="h-4 w-4" /> {saving ? "Saving..." : "Save changes"}
         </Button>
       </div>
 

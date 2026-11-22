@@ -33,38 +33,38 @@ export default function Pagination({
   const go = (n) => onChange(Math.min(Math.max(n, 1), pages));
 
   const btn =
-    "grid h-8 min-w-8 place-items-center rounded-xl px-2 text-sm transition disabled:opacity-40 disabled:pointer-events-none";
+    "grid h-8 min-w-8 place-items-center rounded-full px-2 text-xs font-medium transition disabled:opacity-30 disabled:pointer-events-none";
 
   return (
-    <nav className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" aria-label={label}>
-      <p className="text-xs text-gray-500">
-        Showing {first} to {last} of {total} {unit}
+    <nav className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-2" aria-label={label}>
+      <p className="text-xs text-[#64748B] dark:text-[#A1A1AA]">
+        Showing <span className="font-semibold text-[#0F172A] dark:text-[#F5F7FA]">{first}</span> to <span className="font-semibold text-[#0F172A] dark:text-[#F5F7FA]">{last}</span> of <span className="font-semibold text-[#0F172A] dark:text-[#F5F7FA]">{total}</span> {unit}
       </p>
 
       {pages > 1 && (
         <div className="flex items-center gap-1">
           <button
             type="button"
-            className={`${btn} text-gray-500 hover:bg-gray-100 hover:text-gray-950`}
+            className={`${btn} text-[#64748B] hover:bg-[#F5F7FA] hover:text-[#0F172A] dark:text-[#A1A1AA] dark:hover:bg-[#171A1D] dark:hover:text-[#F5F7FA]`}
             onClick={() => go(page - 1)}
             disabled={page === 1}
             aria-label="Previous page"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="h-3.5 w-3.5" />
           </button>
 
           {pageNumbers(page, pages).map((n, i) =>
             n === "gap" ? (
-              <span key={`gap-${i}`} className="px-1 text-sm text-gray-400" aria-hidden="true">…</span>
+              <span key={`gap-${i}`} className="px-1 text-xs text-[#64748B] dark:text-[#A1A1AA]" aria-hidden="true">…</span>
             ) : (
               <button
                 key={n}
                 type="button"
                 className={`${btn} ${
                   n === page
-                    // Selected state, so brand blue rather than the structural navy.
-                    ? "bg-brand-500 font-semibold text-white"
-                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-950"
+                    // Selected state: Clarivo Cerulean
+                    ? "bg-[#007BA7] font-semibold text-white shadow-sm"
+                    : "text-[#64748B] hover:bg-[#F5F7FA] hover:text-[#0F172A] dark:text-[#A1A1AA] dark:hover:bg-[#171A1D] dark:hover:text-[#F5F7FA]"
                 }`}
                 onClick={() => go(n)}
                 aria-current={n === page ? "page" : undefined}
@@ -77,19 +77,19 @@ export default function Pagination({
 
           <button
             type="button"
-            className={`${btn} text-gray-500 hover:bg-gray-100 hover:text-gray-950`}
+            className={`${btn} text-[#64748B] hover:bg-[#F5F7FA] hover:text-[#0F172A] dark:text-[#A1A1AA] dark:hover:bg-[#171A1D] dark:hover:text-[#F5F7FA]`}
             onClick={() => go(page + 1)}
             disabled={page === pages}
             aria-label="Next page"
           >
-            <ChevronRight className="h-4 w-4" />
+            <ChevronRight className="h-3.5 w-3.5" />
           </button>
         </div>
       )}
 
       {showSizePicker && (
         <select
-          className="rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-700 focus:border-brand-500 focus:outline-none"
+          className="rounded-full border border-[#E4E8EE] dark:border-[#252A30] bg-[#FFFFFF] dark:bg-[#171A1D] px-3 py-1.5 text-xs text-[#0F172A] dark:text-[#F5F7FA] focus:border-[#007BA7] focus:outline-none"
           value={pageSize}
           onChange={(e) => onPageSizeChange(Number(e.target.value))}
           aria-label={`Rows per page`}

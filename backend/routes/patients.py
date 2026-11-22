@@ -21,6 +21,14 @@ async def list_patients(
     db: AsyncSession = Depends(get_db),
 ):
     clinic_id = to_uuid(current_user.get("clinic_id"))
+    from backend.services.demo_data import get_demo_patients, DEMO_CLINIC_ID
+    if db is None or str(clinic_id) == DEMO_CLINIC_ID:
+        return api_response(
+            success=True,
+            message="Patients fetched successfully",
+            data=get_demo_patients(),
+        )
+
     if clinic_id is None:
         return api_response(success=False, message="No clinic associated with user", status_code=400)
 
@@ -39,6 +47,14 @@ async def create_patient(
     db: AsyncSession = Depends(get_db),
 ):
     clinic_id = to_uuid(current_user.get("clinic_id"))
+    from backend.services.demo_data import get_demo_patients, DEMO_CLINIC_ID
+    if db is None or str(clinic_id) == DEMO_CLINIC_ID:
+        return api_response(
+            success=True,
+            message="Patients fetched successfully",
+            data=get_demo_patients(),
+        )
+
     if clinic_id is None:
         return api_response(success=False, message="No clinic associated with user", status_code=400)
 
@@ -102,6 +118,20 @@ async def get_patient_detail(
     db: AsyncSession = Depends(get_db),
 ):
     """A contact with their full history: appointments + calls."""
+    if db is None:
+        from backend.services.demo_data import get_demo_patients, get_demo_appointments, get_demo_calls
+        patients = get_demo_patients()
+        matched = next((p for p in patients if p["id"] == patient_id), patients[0])
+        return api_response(
+            success=True,
+            message="Contact detail fetched",
+            data={
+                "contact": matched,
+                "appointments": get_demo_appointments()[:2],
+                "calls": get_demo_calls()[:2],
+            },
+        )
+
     clinic_id = to_uuid(current_user.get("clinic_id"))
     pid = to_uuid(patient_id)
     if pid is None or clinic_id is None:

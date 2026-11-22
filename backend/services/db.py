@@ -325,12 +325,9 @@ async def close_db_connection():
 
 
 async def get_db():
-    """FastAPI dependency that yields an AsyncSession per request."""
+    """FastAPI dependency that yields an AsyncSession per request, or None if unconfigured."""
     if AsyncSessionLocal is None:
-        from fastapi import HTTPException
-        raise HTTPException(
-            status_code=503,
-            detail="Database is not configured. Set the Supabase DB settings in .env.",
-        )
+        yield None
+        return
     async with AsyncSessionLocal() as session:
         yield session

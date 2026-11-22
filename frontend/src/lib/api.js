@@ -1,21 +1,18 @@
 import axios from "axios";
 
-// Base URL of the FastAPI backend.
-// In direct production deployments (like our Caddy reverse-proxy server at 157.20.190.64),
-// all API requests are routed through the same origin at /api.
+// Base URL of the FastAPI backend. Configurable via Vite env (frontend/.env).
+// Defaults to relative "/api" so requests automatically go to the current host
+// through Vite proxy or FastAPI static mount without cross-origin port mismatch.
 // In external static deployments (like Cloudflare Pages on app.clarivo.net.in),
 // it routes to the dedicated API subdomain https://api.clarivo.net.in/api.
 export function getBaseUrl() {
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
-    if (host === "localhost" || host === "127.0.0.1") {
-      return (import.meta.env.VITE_API_URL || "http://localhost:8000/api").replace(/\/+$/, "");
-    }
-    if (host !== "app.clarivo.net.in" && host !== "clarivo-dashboard-git.pages.dev") {
-      return "/api";
+    if (host === "app.clarivo.net.in" || host === "clarivo-dashboard-git.pages.dev") {
+      return (import.meta.env.VITE_API_URL || "https://api.clarivo.net.in/api").replace(/\/+$/, "");
     }
   }
-  return (import.meta.env.VITE_API_URL || "https://api.clarivo.net.in/api").replace(/\/+$/, "");
+  return (import.meta.env.VITE_API_URL || "/api").replace(/\/+$/, "");
 }
 
 const baseURL = getBaseUrl();

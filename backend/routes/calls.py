@@ -129,6 +129,20 @@ async def get_call_logs(
     filters. The composite index on (clinic_id, created_at DESC) serves the ordering.
     """
     clinic_id = to_uuid(current_user.get("clinic_id"))
+    from backend.services.demo_data import get_demo_calls, DEMO_CLINIC_ID
+    if db is None or str(clinic_id) == DEMO_CLINIC_ID:
+        demo_calls = get_demo_calls()
+        if status:
+            demo_calls = [c for c in demo_calls if c["status"].lower() == status.lower()]
+        return api_response(
+            success=True,
+            message="Call logs retrieved successfully",
+            data=demo_calls,
+            total=len(demo_calls),
+            limit=limit,
+            offset=offset,
+        )
+
     if clinic_id is None:
         return api_response(success=False, message="No clinic associated with user", status_code=400)
 

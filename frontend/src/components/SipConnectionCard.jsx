@@ -101,13 +101,13 @@ export default function SipConnectionCard({
   const primary = numbers[0];
 
   return (
-    <div className="rounded-3xl border border-gray-100 bg-white p-6 shadow-sm space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 pb-3">
+    <div className="clarivo-panel p-6 space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#E4E8EE] dark:border-[#252A30] pb-3">
         <div className="flex items-start gap-2.5">
-          <PlugZap className="mt-0.5 h-5 w-5 shrink-0 text-gray-500" />
+          <PlugZap className="mt-0.5 h-5 w-5 shrink-0 text-[#007BA7]" />
           <div>
-            <h3 className="text-base font-semibold text-gray-950">Your Clarivo connection</h3>
-            <p className="mt-0.5 text-sm text-gray-500">
+            <h3 className="text-base font-semibold text-[#0F172A] dark:text-[#F5F7FA]">Your Clarivo connection</h3>
+            <p className="mt-0.5 text-sm text-[#64748B] dark:text-[#A1A1AA]">
               Give these details to your telephony operator and ask them to send incoming
               calls for your number here.
             </p>

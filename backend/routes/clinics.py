@@ -74,6 +74,14 @@ async def get_settings(
     db: AsyncSession = Depends(get_db),
 ):
     clinic_id = to_uuid(current_user.get("clinic_id"))
+    from backend.services.demo_data import DEMO_CLINIC, DEMO_CLINIC_ID
+    if db is None or str(clinic_id) == DEMO_CLINIC_ID:
+        return api_response(
+            success=True,
+            message="Clinic settings fetched successfully",
+            data=DEMO_CLINIC.copy(),
+        )
+
     if clinic_id is None:
         return api_response(success=False, message="No clinic associated with user", status_code=400)
 

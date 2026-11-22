@@ -325,15 +325,13 @@ export default function Contacts() {
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1 py-0.5">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-gray-950">{labels.contacts}</h1>
-          <p className="mt-2 text-sm text-gray-500">Add and manage {labels.contact.toLowerCase()} records the AI receptionist uses to recognise inbound callers.</p>
+          <h1 className="text-[26px] font-semibold text-[#0F172A] dark:text-[#F5F7FA] tracking-tight leading-tight">{labels.contacts}</h1>
+          <p className="text-[13.5px] text-[#475569] dark:text-[#A1A1AA] mt-0.5">Add and manage {labels.contact.toLowerCase()} records the AI receptionist uses to recognise inbound callers.</p>
         </div>
-        {/* Export stays secondary so Add remains the page's primary action. Wraps rather
-            than shrinking on a narrow screen. */}
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           <Button
             variant="secondary"
             onClick={exportCsv}
@@ -350,7 +348,7 @@ export default function Contacts() {
               <><Download className="h-4 w-4" /> Export CSV</>
             )}
           </Button>
-          <Button onClick={() => { setFormError(""); setForm(emptyForm); setOpen(true); }}>
+          <Button variant="accent" onClick={() => { setFormError(""); setForm(emptyForm); setOpen(true); }}>
             <UserPlus className="h-4 w-4" /> Add {labels.contact.toLowerCase()}
           </Button>
         </div>
@@ -426,11 +424,11 @@ export default function Contacts() {
         <p className="text-xs text-gray-400">Couldn't reach the backend. Sign in and ensure the API is running to see and manage {labels.contacts.toLowerCase()}.</p>
       )}
 
-      <div className="panel grid gap-3 rounded-3xl p-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_11rem_11rem_auto] xl:items-end">
-        <label className="flex items-center gap-2.5 rounded-2xl border border-gray-200 bg-white px-3 py-2">
-          <Search className="h-4 w-4 shrink-0 text-gray-400" />
+      <div className="clarivo-panel grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_11rem_11rem_auto] xl:items-end">
+        <label className="flex items-center gap-2.5 rounded-[14px] border border-[#E4E8EE] dark:border-[#252A30] bg-[#F5F7FA] dark:bg-[#171A1D] px-3.5 py-2">
+          <Search className="h-4 w-4 shrink-0 text-[#64748B] dark:text-[#A1A1AA]" />
           <input
-            className="w-full border-0 bg-transparent p-0 text-sm outline-none placeholder:text-gray-400"
+            className="w-full border-0 bg-transparent p-0 text-[13px] outline-none placeholder:text-[#64748B] dark:placeholder:text-[#A1A1AA] text-[#0F172A] dark:text-[#F5F7FA]"
             placeholder={`Search ${labels.contacts.toLowerCase()} by name, phone, or email...`}
             value={query}
             onChange={(event) => {
@@ -441,10 +439,10 @@ export default function Contacts() {
           />
         </label>
 
-        <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2">
-          <span className="block text-[10px] font-semibold uppercase tracking-wider text-gray-400">Source</span>
+        <div className="rounded-[14px] border border-[#E4E8EE] dark:border-[#252A30] bg-[#F5F7FA] dark:bg-[#171A1D] px-3.5 py-2">
+          <span className="block text-[10px] font-semibold uppercase tracking-wider text-[#64748B] dark:text-[#A1A1AA]">Source</span>
           <select
-            className="mt-0.5 w-full border-0 bg-transparent p-0 text-sm text-gray-900 outline-none"
+            className="mt-0.5 w-full border-0 bg-transparent p-0 text-[13px] text-[#0F172A] dark:text-[#F5F7FA] outline-none"
             value={sourceFilter}
             onChange={(e) => { setSourceFilter(e.target.value); setPage(1); }}
             aria-label="Filter by source"
@@ -456,10 +454,10 @@ export default function Contacts() {
           </select>
         </div>
 
-        <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2">
-          <span className="block text-[10px] font-semibold uppercase tracking-wider text-gray-400">Status</span>
+        <div className="rounded-[14px] border border-[#E4E8EE] dark:border-[#252A30] bg-[#F5F7FA] dark:bg-[#171A1D] px-3.5 py-2">
+          <span className="block text-[10px] font-semibold uppercase tracking-wider text-[#64748B] dark:text-[#A1A1AA]">Status</span>
           <select
-            className="mt-0.5 w-full border-0 bg-transparent p-0 text-sm text-gray-900 outline-none"
+            className="mt-0.5 w-full border-0 bg-transparent p-0 text-[13px] text-[#0F172A] dark:text-[#F5F7FA] outline-none"
             value={statusFilter}
             onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
             aria-label="Filter by status"

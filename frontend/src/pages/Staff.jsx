@@ -229,17 +229,17 @@ export default function Staff() {
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-gray-950">Staff</h1>
-          <p className="mt-2 text-sm text-gray-500">
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 px-1 py-0.5">
+        <div className="max-w-3xl">
+          <h1 className="text-[26px] font-semibold text-[#0F172A] dark:text-[#F5F7FA] tracking-tight leading-[32px]">Staff</h1>
+          <p className="text-[13.5px] text-[#475569] dark:text-[#A1A1AA] mt-1 leading-[20px]">
             Staff can see contacts, appointments, calls and messages, and can add contacts and book
             appointments. They cannot delete records, cancel or move appointments, change agent
             settings, or touch billing.
           </p>
         </div>
-        <Button onClick={openAdd}>
+        <Button variant="accent" onClick={openAdd}>
           <UserPlus className="h-4 w-4" /> Add staff
         </Button>
       </div>
@@ -279,7 +279,7 @@ export default function Staff() {
         emptyDescription="Add a receptionist so they can answer the desk without seeing your billing or agent settings."
         emptyIcon={Users}
         emptyAction={
-          <Button onClick={openAdd}>
+          <Button variant="accent" onClick={openAdd}>
             <UserPlus className="h-4 w-4" /> Add staff
           </Button>
         }
@@ -293,7 +293,7 @@ export default function Staff() {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="secondary" onClick={() => setOpen(false)} disabled={submitting}>Cancel</Button>
-            <Button onClick={submitStaff} disabled={submitting}>
+            <Button variant="accent" onClick={submitStaff} disabled={submitting}>
               {submitting ? "Creating..." : "Create staff account"}
             </Button>
           </div>

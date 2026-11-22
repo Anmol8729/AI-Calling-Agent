@@ -1,16 +1,11 @@
 /**
- * Shared input styling.
- *
- * Kept out of components/ui/Form.jsx because a file that exports both components and
- * plain functions breaks React Fast Refresh (react-refresh/only-export-components).
- * It lives here so a bespoke control — a <select>, or an input with a trailing button
- * — matches a plain <Field> exactly instead of approximating its classes.
+ * Shared input styling (Clarivo Precision Design System).
  */
 
 const BASE =
-  "mt-1 w-full rounded-xl border px-3.5 py-2 text-sm focus:outline-none disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500";
-const OK = "border-gray-200 focus:border-gray-950";
-const ERROR = "border-red-300 focus:border-red-500";
+  "mt-1 w-full rounded-[12px] border bg-white dark:bg-[#111315] px-3.5 py-2.5 text-[13.5px] text-[#0F172A] dark:text-[#F5F7FA] outline-none transition-colors disabled:cursor-not-allowed disabled:bg-[#F5F7FA] dark:disabled:bg-[#171A1D] disabled:text-[#64748B] dark:disabled:text-[#A1A1AA]";
+const OK = "border-[#E4E8EE] dark:border-[#252A30] focus:ring-2 focus:ring-[#007BA7] focus:border-[#007BA7]";
+const ERROR = "border-[#EF4444] focus:ring-2 focus:ring-[#EF4444] focus:border-[#EF4444]";
 
 export function inputClass(hasError = false) {
   return `${BASE} ${hasError ? ERROR : OK}`;

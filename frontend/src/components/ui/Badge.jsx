@@ -1,17 +1,20 @@
 const styles = {
-  success: "bg-emerald-50 text-emerald-700 ring-emerald-200",
-  warning: "bg-amber-50 text-amber-700 ring-amber-200",
-  danger: "bg-red-50 text-red-700 ring-red-200",
-  // For states that are neither good nor bad, only noteworthy — a contact the agent has
-  // not met yet, for instance. Reads as informational rather than as a warning.
-  info: "bg-blue-50 text-blue-700 ring-blue-200",
-  neutral: "bg-gray-100 text-gray-700 ring-gray-200",
-  dark: "bg-brand-500 text-white ring-brand-500",
+  success: "bg-[#22C55E]/10 text-[#15803D] dark:text-[#22C55E] ring-[#22C55E]/20",
+  warning: "bg-[#F59E0B]/10 text-[#B45309] dark:text-[#F59E0B] ring-[#F59E0B]/20",
+  danger: "bg-[#FF2D95]/10 text-[#FF2D95] ring-[#FF2D95]/20",
+  info: "bg-[#007BA7]/10 text-[#007BA7] ring-[#007BA7]/20",
+  neutral: "bg-[#F5F7FA] dark:bg-[#171A1D] text-[#64748B] dark:text-[#A1A1AA] ring-[#E4E8EE] dark:ring-[#252A30]",
+  dark: "bg-[#007BA7] text-white ring-[#007BA7]",
+  accent: "bg-[#FF2D95] text-white ring-[#FF2D95]",
 };
 
 export function Badge({ children, tone = "neutral" }) {
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${styles[tone]}`}>
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11.5px] font-medium ring-1 transition-colors ${
+        styles[tone] || styles.neutral
+      }`}
+    >
       {children}
     </span>
   );

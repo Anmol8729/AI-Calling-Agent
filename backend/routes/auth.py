@@ -73,6 +73,17 @@ async def get_current_user(
     if user_id is None:
         raise credentials_exception
 
+    # Check for local demo user bypass
+    from backend.services.demo_data import DEMO_USER_ID, DEMO_USER
+    if str(user_id) == DEMO_USER_ID or payload.get("sub") == DEMO_USER_ID:
+        return DEMO_USER.copy()
+
+    if db is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is not configured. Set the Supabase DB settings in .env.",
+        )
+
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None:
@@ -598,6 +609,39 @@ async def resend_verification(
 @router.post("/login")
 @limiter.limit("10/minute")
 async def login(request: Request, payload: UserLogin, db: AsyncSession = Depends(get_db)):
+    # Local Demo login support
+    from backend.services.demo_data import DEMO_USER_ID, DEMO_CLINIC_ID
+    if (payload.email or "").strip().lower() in ("demo@clarivo.io", "admin@clarivo.io") and payload.password == "password123":
+        claims = {
+            "sub": DEMO_USER_ID,
+            "role": "doctor",
+            "clinic_id": DEMO_CLINIC_ID,
+            "ver": 0,
+        }
+        access_token = create_access_token(claims)
+        return api_response(
+            success=True,
+            message="Signed in as Demo Administrator",
+            data={
+                "access_token": access_token,
+                "token_type": "bearer",
+                "id": DEMO_USER_ID,
+                "email": payload.email.strip().lower(),
+                "role": "doctor",
+                "name": "Dr. Sarah Patel",
+                "clinic_id": DEMO_CLINIC_ID,
+                "tenant_status": "active",
+                "is_superadmin": True,
+                "email_verified": True,
+            },
+        )
+
+    if db is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Database is not configured. Set the Supabase DB settings in .env.",
+        )
+
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
 
@@ -946,6 +990,14 @@ async def create_staff(
         new staff unable to work while SMTP is unconfigured.
     """
     clinic_id = to_uuid(current_user.get("clinic_id"))
+    from backend.services.demo_data import get_demo_staff, DEMO_CLINIC_ID
+    if db is None or str(clinic_id) == DEMO_CLINIC_ID:
+        return api_response(
+            success=True,
+            message="Staff fetched successfully",
+            data=get_demo_staff(),
+        )
+
     if clinic_id is None:
         return api_response(success=False, message="No clinic associated with your account", status_code=400)
 
@@ -1034,6 +1086,14 @@ async def list_staff(
     team. No password material is returned — only what the management screen shows.
     """
     clinic_id = to_uuid(current_user.get("clinic_id"))
+    from backend.services.demo_data import get_demo_staff, DEMO_CLINIC_ID
+    if db is None or str(clinic_id) == DEMO_CLINIC_ID:
+        return api_response(
+            success=True,
+            message="Staff fetched successfully",
+            data=get_demo_staff(),
+        )
+
     if clinic_id is None:
         return api_response(success=False, message="No clinic associated with your account", status_code=400)
 

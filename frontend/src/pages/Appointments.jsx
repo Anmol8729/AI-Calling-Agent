@@ -551,18 +551,17 @@ export default function Appointments() {
       ];
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1 py-0.5">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-gray-950">{labels.bookings}</h1>
-          <p className="mt-2 text-sm text-gray-500">
+          <h1 className="text-[26px] font-semibold text-[#0F172A] dark:text-[#F5F7FA] tracking-tight leading-tight">{labels.bookings}</h1>
+          <p className="text-[13.5px] text-[#475569] dark:text-[#A1A1AA] mt-0.5 max-w-2xl">
             {isToken
               ? `${labels.bookings} by daily token number. Give walk-ins a token here, and advance "Now serving" as each patient is seen.`
               : `${labels.bookings} booked by the AI receptionist and your team. Walk-ins can be added here — the AI won't double-book a taken slot.`}
           </p>
         </div>
-        {/* Export stays secondary so booking remains the page's primary action. */}
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           <Button
             variant="secondary"
             onClick={exportCsv}
@@ -579,7 +578,7 @@ export default function Appointments() {
               <><Download className="h-4 w-4" /> Export CSV</>
             )}
           </Button>
-          <Button onClick={openBooking}>
+          <Button variant="accent" onClick={openBooking}>
             <CalendarPlus className="h-4 w-4" /> {isToken ? "Give token" : `Book ${labels.booking.toLowerCase()}`}
           </Button>
         </div>
@@ -633,12 +632,12 @@ export default function Appointments() {
         </div>
       )}
 
-      <div className="panel flex flex-col gap-3 rounded-3xl p-4">
+      <div className="clarivo-panel flex flex-col gap-3 p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-          <label className="flex flex-1 items-center gap-2.5 rounded-2xl border border-gray-200 bg-white px-3 py-2">
-            <Search className="h-4 w-4 shrink-0 text-gray-400" />
+          <label className="flex flex-1 items-center gap-2.5 rounded-[14px] border border-[#E4E8EE] dark:border-[#252A30] bg-[#F5F7FA] dark:bg-[#171A1D] px-3.5 py-2">
+            <Search className="h-4 w-4 shrink-0 text-[#64748B] dark:text-[#A1A1AA]" />
             <input
-              className="w-full border-0 bg-transparent p-0 text-sm outline-none placeholder:text-gray-400"
+              className="w-full border-0 bg-transparent p-0 text-[13px] outline-none placeholder:text-[#64748B] dark:placeholder:text-[#A1A1AA] text-[#0F172A] dark:text-[#F5F7FA]"
               placeholder="Search by name, reason, or status..."
               value={query}
               onChange={(event) => { setQuery(event.target.value); setPage(1); }}
@@ -646,22 +645,20 @@ export default function Appointments() {
             />
           </label>
 
-          {/* A real from–to range. The single date input this replaces could not express
-              "this week", which is the span people actually ask for. */}
-          <div className="flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2">
-            <CalendarDays className="h-4 w-4 shrink-0 text-gray-400" />
+          <div className="flex items-center gap-2 rounded-[14px] border border-[#E4E8EE] dark:border-[#252A30] bg-[#F5F7FA] dark:bg-[#171A1D] px-3.5 py-2">
+            <CalendarDays className="h-4 w-4 shrink-0 text-[#64748B] dark:text-[#A1A1AA]" />
             <input
               type="date"
-              className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm outline-none"
+              className="min-w-0 flex-1 border-0 bg-transparent p-0 text-[13px] outline-none text-[#0F172A] dark:text-[#F5F7FA]"
               value={range.from || ""}
               max={range.to || undefined}
               onChange={(e) => { setDatePreset("custom"); setCustomFrom(e.target.value); setPage(1); }}
               aria-label="From date"
             />
-            <span className="shrink-0 text-gray-300">–</span>
+            <span className="shrink-0 text-[#64748B] dark:text-[#A1A1AA]">–</span>
             <input
               type="date"
-              className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm outline-none"
+              className="min-w-0 flex-1 border-0 bg-transparent p-0 text-[13px] outline-none text-[#0F172A] dark:text-[#F5F7FA]"
               value={range.to || ""}
               min={range.from || undefined}
               onChange={(e) => { setDatePreset("custom"); setCustomTo(e.target.value); setPage(1); }}

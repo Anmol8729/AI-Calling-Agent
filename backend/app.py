@@ -1,9 +1,11 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -122,15 +124,6 @@ app.include_router(public_router, prefix="/api")
 # Mount Websocket Routing
 app.include_router(ws_router)
 
-@app.get("/")
-async def root():
-    return {
-        "success": True,
-        "message": "Clarivo Receptionist API is running",
-        "version": "1.0.0"
-    }
-
-
 @app.get("/health", tags=["Health"])
 @app.get("/api/health", tags=["Health"])
 async def health():
@@ -160,6 +153,31 @@ async def health():
         content={"status": "healthy" if healthy else "degraded", "checks": checks,
                  "version": "1.0.0"},
     )
+
+# Static files and SPA fallback must be registered after all API routes
+DIST_DIR = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if (DIST_DIR / "index.html").is_file():
+    assets_dir = DIST_DIR / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="frontend_assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str = ""):
+        # Pass through unmatched API, docs or ws paths to normal 404 rather than serving index.html
+        if full_path and full_path.startswith(("api", "docs", "openapi.json", "health", "ws")):
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
+        target_file = DIST_DIR / full_path
+        if full_path and target_file.is_file():
+            return FileResponse(target_file)
+        return FileResponse(DIST_DIR / "index.html")
+else:
+    @app.get("/")
+    async def root():
+        return {
+            "success": True,
+            "message": "Clarivo Receptionist API is running",
+            "version": "1.0.0"
+        }
 
 if __name__ == "__main__":
     import uvicorn

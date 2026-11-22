@@ -33,6 +33,14 @@ async def list_appointments(
     db: AsyncSession = Depends(get_db),
 ):
     clinic_id = to_uuid(current_user.get("clinic_id"))
+    from backend.services.demo_data import get_demo_appointments, DEMO_CLINIC_ID
+    if db is None or str(clinic_id) == DEMO_CLINIC_ID:
+        return api_response(
+            success=True,
+            message="Appointments fetched successfully",
+            data=get_demo_appointments(),
+        )
+
     if clinic_id is None:
         return api_response(success=False, message="No clinic associated with user", status_code=400)
 
@@ -57,6 +65,14 @@ async def create_appointment(
     db: AsyncSession = Depends(get_db),
 ):
     clinic_id = to_uuid(current_user.get("clinic_id"))
+    from backend.services.demo_data import get_demo_appointments, DEMO_CLINIC_ID
+    if db is None or str(clinic_id) == DEMO_CLINIC_ID:
+        return api_response(
+            success=True,
+            message="Appointments fetched successfully",
+            data=get_demo_appointments(),
+        )
+
     if clinic_id is None:
         return api_response(success=False, message="No clinic associated with user", status_code=400)
 
@@ -202,6 +218,14 @@ async def get_queue(
     """Today's queue: the "now serving" number, highest token issued, and the
     list of today's token appointments (ordered by token number)."""
     clinic_id = to_uuid(current_user.get("clinic_id"))
+    from backend.services.demo_data import get_demo_appointments, DEMO_CLINIC_ID
+    if db is None or str(clinic_id) == DEMO_CLINIC_ID:
+        return api_response(
+            success=True,
+            message="Appointments fetched successfully",
+            data=get_demo_appointments(),
+        )
+
     if clinic_id is None:
         return api_response(success=False, message="No clinic associated with user", status_code=400)
 
@@ -231,6 +255,14 @@ async def queue_next(
 ):
     """Advance the "now serving" number by one (auto-rolls over on a new day)."""
     clinic_id = to_uuid(current_user.get("clinic_id"))
+    from backend.services.demo_data import get_demo_appointments, DEMO_CLINIC_ID
+    if db is None or str(clinic_id) == DEMO_CLINIC_ID:
+        return api_response(
+            success=True,
+            message="Appointments fetched successfully",
+            data=get_demo_appointments(),
+        )
+
     if clinic_id is None:
         return api_response(success=False, message="No clinic associated with user", status_code=400)
 
@@ -248,6 +280,14 @@ async def queue_set(
 ):
     """Set the "now serving" number directly for today (also used to reset to 0)."""
     clinic_id = to_uuid(current_user.get("clinic_id"))
+    from backend.services.demo_data import get_demo_appointments, DEMO_CLINIC_ID
+    if db is None or str(clinic_id) == DEMO_CLINIC_ID:
+        return api_response(
+            success=True,
+            message="Appointments fetched successfully",
+            data=get_demo_appointments(),
+        )
+
     if clinic_id is None:
         return api_response(success=False, message="No clinic associated with user", status_code=400)
 
