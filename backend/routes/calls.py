@@ -9,6 +9,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Response, Depends, Request, Header, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.integrations.vobiz.client import VobizClient
@@ -404,8 +405,12 @@ async def agent_book_appointment(
             token_number=token_num, token_date=today, phone=caller_phone,
             reason=payload.reason, status="scheduled",
         )
-        db.add(appt)
-        await db.commit()
+        try:
+            db.add(appt)
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            return api_response(success=False, message="slot_unavailable", data={"available": False}, status_code=409)
         _publish_appt_event(clinic_id, appt.id, name, display)
         asyncio.create_task(_post_book_side_effects(clinic_id, caller_phone, name, display, age=payload.age, gender=payload.gender))
         return api_response(
@@ -430,8 +435,12 @@ async def agent_book_appointment(
         appointment_date=display, appointment_at=appt_at, duration_min=duration_min,
         phone=caller_phone, reason=payload.reason, status="scheduled",
     )
-    db.add(appt)
-    await db.commit()
+    try:
+        db.add(appt)
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        return api_response(success=False, message="slot_unavailable", data={"available": False}, status_code=409)
     _publish_appt_event(clinic_id, appt.id, name, display)
     asyncio.create_task(_post_book_side_effects(clinic_id, caller_phone, name, display))
     return api_response(

@@ -287,6 +287,23 @@ class Appointment(Base):
         # Calendar and conflict-detection reads are always scoped to one tenant and
         # ordered/filtered by start time.
         Index("ix_appointments_clinic_at", "clinic_id", "appointment_at"),
+        # Partial unique index enforcing no double bookings for active slots
+        Index(
+            "uq_appointments_clinic_scheduled_slot",
+            "clinic_id",
+            "appointment_at",
+            unique=True,
+            postgresql_where=text("status = 'scheduled' AND appointment_at IS NOT NULL"),
+        ),
+        # Partial unique index enforcing unique daily token numbers per tenant
+        Index(
+            "uq_appointments_clinic_token_day",
+            "clinic_id",
+            "token_date",
+            "token_number",
+            unique=True,
+            postgresql_where=text("token_date IS NOT NULL AND token_number IS NOT NULL"),
+        ),
     )
 
 

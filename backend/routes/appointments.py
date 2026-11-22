@@ -4,6 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.db import get_db
@@ -92,8 +93,16 @@ async def create_appointment(
             reason=payload.reason,
             status=payload.status or "scheduled",
         )
-        db.add(appointment)
-        await db.commit()
+        try:
+            db.add(appointment)
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            return api_response(
+                success=False,
+                message="That token or slot is already booked. Please try again.",
+                status_code=409,
+            )
 
         events.publish(clinic_id, {
             "id": f"appt-{appointment.id}",
@@ -148,8 +157,16 @@ async def create_appointment(
         reason=payload.reason,
         status=payload.status or "scheduled",
     )
-    db.add(appointment)
-    await db.commit()
+    try:
+        db.add(appointment)
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        return api_response(
+            success=False,
+            message="That time slot is already booked. Please choose another time.",
+            status_code=409,
+        )
 
     events.publish(clinic_id, {
         "id": f"appt-{appointment.id}",
@@ -328,7 +345,15 @@ async def reschedule_appointment(
     appointment.appointment_date = payload.appointment_at.strftime("%d %b %Y, %I:%M %p")
     appointment.status = "scheduled"
     appointment.reminder_sent = False  # re-send a reminder for the new time
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        return api_response(
+            success=False,
+            message="That time slot is already booked. Please choose another time.",
+            status_code=409,
+        )
 
     await audit.record(
         audit.APPOINTMENT_UPDATED, actor=current_user, clinic_id=clinic_id,
