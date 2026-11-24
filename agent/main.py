@@ -1310,6 +1310,51 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     session.on("user_state_changed", _on_user_state_changed)
 
+    # Hard call duration cap (default 240s = 4 minutes).
+    # Protects against runaway telecom and AI expenses if a caller forgets to hang up,
+    # stays silent without triggering VAD away, or stays in an indecisive conversation.
+    max_call_duration = float(os.getenv("AGENT_MAX_CALL_DURATION_SEC", "240") or "240")
+    _duration_watchdog_task = None
+
+    async def _enforce_call_duration_cap():
+        try:
+            await asyncio.sleep(max_call_duration)
+            if _ended["done"]:
+                return
+            mins = int(round(max_call_duration / 60))
+            logger.warning(
+                f"Hard call duration cap reached ({max_call_duration:.0f}s / {mins} min). "
+                "Initiating polite wrap-up and terminating call."
+            )
+            try:
+                wrap_msg = (
+                    f"कॉल की अधिकतम समय सीमा ({mins} मिनट) पूरी हो गई है। "
+                    "आगे की जानकारी के लिए कृपया क्लिनिक से संपर्क करें। धन्यवाद!"
+                    if mins >= 1 else
+                    "कॉल की समय सीमा समाप्त हो गई है। आगे की जानकारी के लिए कृपया क्लिनिक से संपर्क करें। धन्यवाद!"
+                )
+                await session.say(wrap_msg, allow_interruptions=False)
+            except Exception:
+                pass
+            try:
+                await get_job_context().delete_room()
+            except Exception:
+                pass
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Error in call duration cap watchdog: {e}")
+
+    if max_call_duration > 0:
+        _duration_watchdog_task = asyncio.create_task(_enforce_call_duration_cap())
+
+        def _cancel_duration_watchdog():
+            if _duration_watchdog_task and not _duration_watchdog_task.done():
+                _duration_watchdog_task.cancel()
+
+        session.on("close", lambda ev: _cancel_duration_watchdog())
+        ctx.add_shutdown_callback(_cancel_duration_watchdog)
+
     # Ensure the TTS connection warm-up (started above) has finished so the greeting
     # plays right away instead of paying a cold handshake. SKIPPED when the greeting
     # audio is already cached: there is no MiniMax request to make, so waiting up to
