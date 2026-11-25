@@ -5,11 +5,19 @@ import api from "../lib/api";
 // sign-in all persist the session identically — three copies of this would be three
 // chances for them to drift apart.
 function adoptSession(set, data) {
-  localStorage.setItem("token", data.access_token);
-  localStorage.setItem("user", JSON.stringify(data));
+  const safeUser = { ...data };
+  delete safeUser.access_token;
+
+  if (data.cookie_auth || data.is_superadmin) {
+    // Admin session tokens live strictly in HttpOnly cookies, never in localStorage.
+    localStorage.removeItem("token");
+  } else if (data.access_token) {
+    localStorage.setItem("token", data.access_token);
+  }
+  localStorage.setItem("user", JSON.stringify(safeUser));
   set({
-    token: data.access_token,
-    user: data,
+    token: data.cookie_auth || data.is_superadmin ? null : (data.access_token || null),
+    user: safeUser,
     isAuthenticated: true,
     loading: false,
     error: null,
@@ -43,7 +51,15 @@ export const useAuthStore = create((set) => ({
       return null;
     }
   })(),
-  isAuthenticated: !!localStorage.getItem("token"),
+  isAuthenticated: (() => {
+    if (localStorage.getItem("token")) return true;
+    try {
+      const u = localStorage.getItem("user");
+      return !!(u && u !== "undefined" && JSON.parse(u)?.cookie_auth);
+    } catch {
+      return false;
+    }
+  })(),
   loading: false,
   error: null,
 
@@ -53,7 +69,7 @@ export const useAuthStore = create((set) => ({
       const response = await api.post(`/auth/login`, { email, password });
       const { success, data, message } = response.data;
       
-      if (success && data.access_token) {
+      if (success && (data?.access_token || data?.cookie_auth)) {
         adoptSession(set, data);
         return true;
       } else {
@@ -106,7 +122,7 @@ export const useAuthStore = create((set) => ({
         access_token: supabaseAccessToken,
       });
       const { success, data, message } = response.data;
-      if (success && data?.access_token) {
+      if (success && (data?.access_token || data?.cookie_auth)) {
         adoptSession(set, data);
         return { ok: true, isNewAccount: Boolean(data.is_new_account) };
       }
@@ -128,12 +144,9 @@ export const useAuthStore = create((set) => ({
   },
 
   logout: async () => {
-    // Ask the server to revoke every token for this account first, so a copy of
-    // this token taken off the machine stops working too. Clearing localStorage
-    // alone left it valid until it expired. Best-effort: a network failure must
-    // still let the user out of the browser.
+    // Ask the server to revoke the active session and clear HttpOnly admin cookies.
     try {
-      await api.post("/auth/logout-all-devices");
+      await api.post("/auth/logout");
     } catch {
       // already signed out, offline, or token expired — nothing to do
     }

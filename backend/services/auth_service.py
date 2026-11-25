@@ -1,21 +1,62 @@
 from datetime import datetime, timedelta
-from typing import Optional, Union, Any
+from typing import Optional
 from jose import jwt, JWTError
 import bcrypt
 import secrets
 import hashlib
 from backend.config.settings import settings
 
+try:
+    from argon2 import PasswordHasher, Type
+    from argon2.exceptions import VerifyMismatchError, InvalidHashError
+    _ARGON2_HASHER = PasswordHasher(
+        time_cost=3,
+        memory_cost=65536,
+        parallelism=2,
+        hash_len=32,
+        salt_len=16,
+        type=Type.ID,
+    )
+except ImportError:  # pragma: no cover — fallback only if argon2-cffi is absent
+    _ARGON2_HASHER = None
+    VerifyMismatchError = Exception
+    InvalidHashError = Exception
+
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
+    if not plain_password or not hashed_password:
+        return False
+    if hashed_password.startswith("$argon2"):
+        if _ARGON2_HASHER is None:
+            return False
+        try:
+            return _ARGON2_HASHER.verify(hashed_password, plain_password)
+        except (VerifyMismatchError, InvalidHashError, Exception):
+            return False
     try:
-        return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+        return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
     except Exception:
         return False
 
+
 def get_password_hash(password: str) -> str:
+    if _ARGON2_HASHER is not None:
+        return _ARGON2_HASHER.hash(password)
     salt = bcrypt.gensalt()
-    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
-    return hashed.decode('utf-8')
+    hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
+    return hashed.decode("utf-8")
+
+
+def password_needs_rehash(hashed_password: str) -> bool:
+    """Return True if a stored hash should be upgraded to current Argon2id parameters."""
+    if not hashed_password or _ARGON2_HASHER is None:
+        return False
+    if not hashed_password.startswith("$argon2id$"):
+        return True
+    try:
+        return _ARGON2_HASHER.check_needs_rehash(hashed_password)
+    except Exception:
+        return False
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Sign a user session token.
@@ -50,6 +91,7 @@ def session_claims(user, clinic_id_str: Optional[str] = None) -> dict:
             str(user.clinic_id) if user.clinic_id else None
         ),
         "ver": int(getattr(user, "token_version", 0) or 0),
+        "jti": secrets.token_urlsafe(16),
     }
 
 def decode_access_token(token: str) -> Optional[dict]:

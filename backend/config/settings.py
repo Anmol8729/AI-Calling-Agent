@@ -49,10 +49,24 @@ class Settings(BaseSettings):
         os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(60 * 24)) or str(60 * 24)
     )
 
-    # Platform super-admins (comma-separated emails). Users whose login email is
-    # listed here can access /admin (assign plans / custom allowances across all
-    # tenants). Everyone else is 403. Set this in .env to your own email(s).
+    # Designated single platform administrator email. Only ONE designated admin
+    # account is permitted to access the admin panel with single-active-session
+    # enforcement. Falls back to the first entry in SUPERADMIN_EMAILS if unset.
+    ADMIN_EMAIL: str = os.getenv("ADMIN_EMAIL", "")
+    ADMIN_SESSION_IDLE_MINUTES: int = int(
+        os.getenv("ADMIN_SESSION_IDLE_MINUTES", "30") or "30"
+    )
     SUPERADMIN_EMAILS: str = os.getenv("SUPERADMIN_EMAILS", "")
+
+    @property
+    def designated_admin_email(self) -> str:
+        if (self.ADMIN_EMAIL or "").strip():
+            return self.ADMIN_EMAIL.strip().lower()
+        for entry in (self.SUPERADMIN_EMAILS or "").split(","):
+            cleaned = entry.strip().lower()
+            if cleaned:
+                return cleaned
+        return ""
 
     # Monthly call-quota enforcement on inbound calls. OFF by default and
     # fail-open (any error while checking -> the call is allowed). When ON, calls

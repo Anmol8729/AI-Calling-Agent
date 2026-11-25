@@ -17,7 +17,7 @@ DEMO_USER = {
     "role": "doctor",
     "clinic_id": DEMO_CLINIC_ID,
     "tenant_status": "active",
-    "is_superadmin": True,
+    "is_superadmin": False,
     "email_verified": True,
     "token_version": 0,
 }

@@ -1,9 +1,10 @@
 import asyncio
 import logging
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
@@ -16,6 +17,7 @@ from backend.services.limiter import limiter
 from backend.services.auth_service import (
     get_password_hash,
     verify_password,
+    password_needs_rehash,
     create_access_token,
     decode_access_token,
     generate_token,
@@ -46,12 +48,52 @@ logger = logging.getLogger("auth-router")
 _DUMMY_PASSWORD_HASH = get_password_hash("clarivo-timing-equaliser-not-a-real-password")
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
+
+_ADMIN_COOKIE_NAME = "clarivo_admin_session"
+_CSRF_COOKIE_NAME = "clarivo_csrf_token"
+_STATE_CHANGING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+# Tracks last activity timestamp per (user_id, token_version) for admin inactivity timeout.
+_admin_last_activity: dict[tuple[str, int], datetime] = {}
+
+
+def _is_secure_cookie_env() -> bool:
+    return (settings.ENV or "").strip().lower() in ("production", "prod", "staging")
+
+
+def _set_admin_cookies(response: Response, token: str) -> str:
+    csrf_token = secrets.token_urlsafe(24)
+    secure = _is_secure_cookie_env()
+    max_age = max(60, int(settings.ADMIN_SESSION_IDLE_MINUTES) * 60)
+    response.set_cookie(
+        key=_ADMIN_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        path="/",
+        max_age=max_age,
+    )
+    response.set_cookie(
+        key=_CSRF_COOKIE_NAME,
+        value=csrf_token,
+        httponly=False,
+        secure=secure,
+        samesite="lax",
+        path="/",
+        max_age=max_age,
+    )
+    return csrf_token
+
+
+def _clear_admin_cookies(response: Response) -> None:
+    response.delete_cookie(key=_ADMIN_COOKIE_NAME, path="/")
+    response.delete_cookie(key=_CSRF_COOKIE_NAME, path="/")
 
 
 async def get_current_user(
     request: Request = None,
-    token: str = Depends(oauth2_scheme),
+    token: Optional[str] = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ):
     credentials_exception = HTTPException(
@@ -59,6 +101,23 @@ async def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    via_cookie = False
+    if not token and request is not None:
+        token = request.cookies.get(_ADMIN_COOKIE_NAME)
+        via_cookie = bool(token)
+
+    if not token:
+        raise credentials_exception
+
+    if via_cookie and request is not None and request.method.upper() in _STATE_CHANGING_METHODS:
+        csrf_cookie = request.cookies.get(_CSRF_COOKIE_NAME) or ""
+        csrf_header = request.headers.get("X-CSRF-Token") or ""
+        if not csrf_cookie or not csrf_header or not secrets.compare_digest(csrf_cookie, csrf_header):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="CSRF token validation failed",
+            )
+
     payload = decode_access_token(token)
     if payload is None:
         raise credentials_exception
@@ -73,10 +132,11 @@ async def get_current_user(
     if user_id is None:
         raise credentials_exception
 
-    # Check for local demo user bypass
-    from backend.services.demo_data import DEMO_USER_ID, DEMO_USER
-    if str(user_id) == DEMO_USER_ID or payload.get("sub") == DEMO_USER_ID:
-        return DEMO_USER.copy()
+    # Local demo bypass ONLY when no database is configured AND running in dev/test.
+    if db is None and (settings.ENV or "").strip().lower() in ("development", "test"):
+        from backend.services.demo_data import DEMO_USER_ID, DEMO_USER
+        if str(user_id) == DEMO_USER_ID or payload.get("sub") == DEMO_USER_ID:
+            return DEMO_USER.copy()
 
     if db is None:
         raise HTTPException(
@@ -97,16 +157,32 @@ async def get_current_user(
             detail="This account has been suspended. Please contact support.",
         )
 
-    # Revocation check. Password change / reset / "log out everywhere" bump
-    # token_version, which instantly invalidates every token carrying the old
-    # value. Tokens minted before this column existed have no `ver` and are read
-    # as 0, matching the default, so nobody is logged out by the upgrade itself.
-    if int(payload.get("ver", 0) or 0) != int(getattr(user, "token_version", 0) or 0):
+    # Revocation check. Password change / reset / "log out everywhere" / single-admin-session
+    # bump token_version, which instantly invalidates every token carrying the old value.
+    current_ver = int(getattr(user, "token_version", 0) or 0)
+    if int(payload.get("ver", 0) or 0) != current_ver:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="This session has ended. Please sign in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Admin inactivity timeout check
+    if is_superadmin(user.email):
+        session_key = (str(user.id), current_ver)
+        now = datetime.utcnow()
+        idle_limit = timedelta(minutes=max(1, int(settings.ADMIN_SESSION_IDLE_MINUTES)))
+        last_seen = _admin_last_activity.get(session_key)
+        if last_seen is not None and (now - last_seen) > idle_limit:
+            _admin_last_activity.pop(session_key, None)
+            user.token_version = current_ver + 1
+            await db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Admin session expired due to inactivity. Please sign in again.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        _admin_last_activity[session_key] = now
 
     # Check tenant lifecycle status (approval gate)
     tenant_status = "active"
@@ -178,9 +254,9 @@ async def require_non_staff(current_user: dict = Depends(get_current_user)):
 
 
 def is_superadmin(email: str) -> bool:
-    """True if the email is in the platform SUPERADMIN_EMAILS allowlist."""
-    allow = [e.strip().lower() for e in (settings.SUPERADMIN_EMAILS or "").split(",") if e.strip()]
-    return bool(email) and email.strip().lower() in allow
+    """True ONLY if the email matches the single designated platform admin email."""
+    designated = settings.designated_admin_email
+    return bool(email) and bool(designated) and email.strip().lower() == designated
 
 
 async def require_superadmin(current_user: dict = Depends(get_current_user)):
@@ -221,6 +297,13 @@ async def require_superadmin(current_user: dict = Depends(get_current_user)):
 @router.post("/register")
 @limiter.limit("5/minute")
 async def register(request: Request, payload: UserRegister, db: AsyncSession = Depends(get_db)):
+    if is_superadmin(payload.email):
+        return api_response(
+            success=False,
+            message="Public registration is disabled for platform administration accounts.",
+            status_code=403,
+        )
+
     # Check if user already exists
     existing = await db.execute(select(User).where(User.email == payload.email))
     if existing.scalar_one_or_none():
@@ -376,6 +459,7 @@ class GoogleSignIn(BaseModel):
 @limiter.limit("10/minute")
 async def google_sign_in(
     request: Request,
+    response: Response,
     payload: GoogleSignIn,
     db: AsyncSession = Depends(get_db),
 ):
@@ -430,6 +514,12 @@ async def google_sign_in(
 
     created = False
     if user is None:
+        if is_superadmin(identity.email):
+            return api_response(
+                success=False,
+                message="Platform administration accounts cannot be created via public sign-up.",
+                status_code=403,
+            )
         # New account. Mirrors /register: a tenant is created so the person lands in
         # their own workspace, seeded from the industry template.
         created = True
@@ -499,13 +589,28 @@ async def google_sign_in(
     user.updated_at = datetime.utcnow()
     # Clears any brute-force lockout: proving control of the Google account is
     # stronger evidence than the lockout is protection.
+    admin_user = is_superadmin(user.email)
+    if admin_user:
+        old_ver = int(getattr(user, "token_version", 0) or 0)
+        _admin_last_activity.pop((str(user.id), old_ver), None)
+        user.token_version = old_ver + 1
+
     login_guard.register_success(user)
 
     await db.commit()
     await db.refresh(user)
 
+    if admin_user:
+        _admin_last_activity[(str(user.id), int(user.token_version or 0))] = datetime.utcnow()
+
     clinic_id_str = str(user.clinic_id) if user.clinic_id else None
-    access_token = create_access_token(session_claims(user, clinic_id_str))
+    if admin_user:
+        access_token = create_access_token(
+            {**session_claims(user, clinic_id_str), "admin_session": True},
+            expires_delta=timedelta(minutes=max(1, int(settings.ADMIN_SESSION_IDLE_MINUTES))),
+        )
+    else:
+        access_token = create_access_token(session_claims(user, clinic_id_str))
 
     tenant_status = "active"
     if user.clinic_id:
@@ -517,28 +622,34 @@ async def google_sign_in(
         audit.AUTH_LOGIN, actor_email=user.email, clinic_id=user.clinic_id,
         target_type="user", target_id=user.id,
         detail={"provider": "google", "account_created": created,
-                "identity_linked": linked_existing},
+                "identity_linked": linked_existing, "single_session_rotated": admin_user},
         request=request,
     )
+
+    resp_data = {
+        "id": str(user.id),
+        "email": user.email,
+        "role": user.role,
+        "name": user.name,
+        "avatar_url": user.avatar_url,
+        "clinic_id": clinic_id_str,
+        "tenant_status": tenant_status,
+        "is_superadmin": admin_user,
+        "email_verified": user.email_verified_at is not None,
+        # Lets the dashboard send a first-time user through onboarding.
+        "is_new_account": created,
+    }
+    if admin_user:
+        _set_admin_cookies(response, access_token)
+        resp_data["cookie_auth"] = True
+    else:
+        resp_data["access_token"] = access_token
+        resp_data["token_type"] = "bearer"
 
     return api_response(
         success=True,
         message="Signed in with Google",
-        data={
-            "access_token": access_token,
-            "token_type": "bearer",
-            "id": str(user.id),
-            "email": user.email,
-            "role": user.role,
-            "name": user.name,
-            "avatar_url": user.avatar_url,
-            "clinic_id": clinic_id_str,
-            "tenant_status": tenant_status,
-            "is_superadmin": is_superadmin(user.email),
-            "email_verified": user.email_verified_at is not None,
-            # Lets the dashboard send a first-time user through onboarding.
-            "is_new_account": created,
-        },
+        data=resp_data,
     )
 
 
@@ -608,34 +719,7 @@ async def resend_verification(
 
 @router.post("/login")
 @limiter.limit("10/minute")
-async def login(request: Request, payload: UserLogin, db: AsyncSession = Depends(get_db)):
-    # Local Demo login support
-    from backend.services.demo_data import DEMO_USER_ID, DEMO_CLINIC_ID
-    if (payload.email or "").strip().lower() in ("demo@clarivo.io", "admin@clarivo.io") and payload.password == "password123":
-        claims = {
-            "sub": DEMO_USER_ID,
-            "role": "doctor",
-            "clinic_id": DEMO_CLINIC_ID,
-            "ver": 0,
-        }
-        access_token = create_access_token(claims)
-        return api_response(
-            success=True,
-            message="Signed in as Demo Administrator",
-            data={
-                "access_token": access_token,
-                "token_type": "bearer",
-                "id": DEMO_USER_ID,
-                "email": payload.email.strip().lower(),
-                "role": "doctor",
-                "name": "Dr. Sarah Patel",
-                "clinic_id": DEMO_CLINIC_ID,
-                "tenant_status": "active",
-                "is_superadmin": True,
-                "email_verified": True,
-            },
-        )
-
+async def login(request: Request, response: Response, payload: UserLogin, db: AsyncSession = Depends(get_db)):
     if db is None:
         raise HTTPException(
             status_code=503,
@@ -650,8 +734,6 @@ async def login(request: Request, payload: UserLogin, db: AsyncSession = Depends
     invalid = api_response(success=False, message="Invalid email or password", status_code=400)
 
     if not user:
-        # Spend a comparable amount of time on a non-existent account so response
-        # timing does not reveal whether the address is registered.
         verify_password(payload.password, _DUMMY_PASSWORD_HASH)
         await audit.record(
             audit.AUTH_LOGIN_FAILED, actor_email=payload.email, outcome="failure",
@@ -660,10 +742,6 @@ async def login(request: Request, payload: UserLogin, db: AsyncSession = Depends
         return invalid
 
     if not user.password_hash:
-        # Created through Google, so there is no password to check. Still spend the
-        # bcrypt time, otherwise a fast rejection here reveals which accounts are
-        # Google-only. The message names Google because a generic "invalid password"
-        # would leave the person retrying a password they never set.
         verify_password(payload.password, _DUMMY_PASSWORD_HASH)
         await audit.record(
             audit.AUTH_LOGIN_FAILED, actor_email=user.email, clinic_id=user.clinic_id,
@@ -679,9 +757,6 @@ async def login(request: Request, payload: UserLogin, db: AsyncSession = Depends
             status_code=400,
         )
 
-    # Verify the password even when the account is locked, so a locked account and
-    # a wrong password cost about the same. Returning early here would leak lock
-    # state through response timing.
     password_ok = verify_password(payload.password, user.password_hash)
 
     if login_guard.is_locked(user):
@@ -702,8 +777,6 @@ async def login(request: Request, payload: UserLogin, db: AsyncSession = Depends
         )
 
     if not password_ok:
-        # Per-ACCOUNT lockout. The IP rate limit above is flood protection only; it
-        # does nothing against credential stuffing from a pool of addresses.
         locked = login_guard.register_failure(user)
         await db.commit()
         await audit.record(
@@ -726,20 +799,42 @@ async def login(request: Request, payload: UserLogin, db: AsyncSession = Depends
         return invalid
 
     if not bool(getattr(user, "is_active", True)):
-        # Same generic wording as a bad password: whether an account exists and
-        # whether it is suspended are both details worth not confirming.
         return invalid
 
-    # Genuine sign-in: clear the failure counter and stamp the login time.
+    # Transparently upgrade legacy bcrypt hashes to Argon2id on successful login.
+    if password_needs_rehash(user.password_hash):
+        user.password_hash = get_password_hash(payload.password)
+
+    # Single active session for the designated admin: atomically bump token_version
+    # so any previous admin session on any other device/browser is immediately revoked.
+    admin_user = is_superadmin(user.email)
+    if admin_user:
+        old_ver = int(getattr(user, "token_version", 0) or 0)
+        _admin_last_activity.pop((str(user.id), old_ver), None)
+        user.token_version = old_ver + 1
+
     login_guard.register_success(user)
     await db.commit()
+    await db.refresh(user)
+
+    if admin_user:
+        _admin_last_activity[(str(user.id), int(user.token_version or 0))] = datetime.utcnow()
+
     await audit.record(
         audit.AUTH_LOGIN, actor_email=user.email, clinic_id=user.clinic_id,
-        target_type="user", target_id=user.id, request=request,
+        target_type="user", target_id=user.id,
+        detail={"single_session_rotated": admin_user},
+        request=request,
     )
 
     clinic_id_str = str(user.clinic_id) if user.clinic_id else None
-    access_token = create_access_token(session_claims(user, clinic_id_str))
+    claims = session_claims(user, clinic_id_str)
+    if admin_user:
+        claims["admin_session"] = True
+        expires = timedelta(minutes=max(1, int(settings.ADMIN_SESSION_IDLE_MINUTES)))
+        access_token = create_access_token(claims, expires_delta=expires)
+    else:
+        access_token = create_access_token(claims)
 
     tenant_status = "active"
     if user.clinic_id:
@@ -748,18 +843,66 @@ async def login(request: Request, payload: UserLogin, db: AsyncSession = Depends
             tenant_status = t.status
 
     response_data = {
-        "access_token": access_token,
-        "token_type": "bearer",
         "id": str(user.id),
         "email": user.email,
         "role": user.role,
         "name": user.name,
         "clinic_id": clinic_id_str,
         "tenant_status": tenant_status,
-        "is_superadmin": is_superadmin(user.email),
+        "is_superadmin": admin_user,
         "email_verified": user.email_verified_at is not None,
     }
+    if admin_user:
+        # Admin session token is placed strictly in an HttpOnly cookie (never localStorage).
+        _set_admin_cookies(response, access_token)
+        response_data["cookie_auth"] = True
+    else:
+        response_data["access_token"] = access_token
+        response_data["token_type"] = "bearer"
+
     return api_response(success=True, message="Login successful", data=response_data)
+
+
+@router.post("/admin/login")
+@limiter.limit("5/minute")
+async def admin_login(request: Request, response: Response, payload: UserLogin, db: AsyncSession = Depends(get_db)):
+    """Dedicated single-admin login endpoint with stricter rate limit and single-session rotation."""
+    if not is_superadmin(payload.email):
+        verify_password(payload.password, _DUMMY_PASSWORD_HASH)
+        await audit.record(
+            audit.AUTH_LOGIN_FAILED, actor_email=payload.email,
+            outcome="failure", detail={"reason": "non_admin_attempted_admin_login"},
+            request=request,
+        )
+        return api_response(
+            success=False,
+            message="Access denied. Only the designated platform administrator may sign in here.",
+            status_code=403,
+        )
+    return await login(request, response, payload, db)
+
+
+@router.post("/logout")
+async def logout(
+    request: Request,
+    response: Response,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke the current session server-side and clear HttpOnly admin cookies."""
+    user = (await db.execute(
+        select(User).where(User.id == to_uuid(current_user["id"]))
+    )).scalar_one_or_none()
+    if user:
+        old_ver = int(getattr(user, "token_version", 0) or 0)
+        _admin_last_activity.pop((str(user.id), old_ver), None)
+        user.token_version = old_ver + 1
+        await db.commit()
+        await audit.record(
+            "auth.logout", actor=current_user, target_type="user", target_id=user.id, request=request,
+        )
+    _clear_admin_cookies(response)
+    return api_response(success=True, message="Signed out successfully.")
 
 
 @router.get("/me")

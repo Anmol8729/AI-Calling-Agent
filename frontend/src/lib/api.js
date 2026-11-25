@@ -17,16 +17,25 @@ export function getBaseUrl() {
 
 const baseURL = getBaseUrl();
 
-const api = axios.create({ baseURL });
+const api = axios.create({ baseURL, withCredentials: true });
 
-// Attach the JWT (when present) from localStorage on every request. Reading it
-// per-request means auth survives full page reloads with no manual header
-// bookkeeping, and logout takes effect as soon as the token is cleared.
+function readCookie(name) {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+// Attach the JWT (when present in localStorage for clinic users) and CSRF token
+// (for HttpOnly cookie-authenticated admin sessions) on every request.
 api.interceptors.request.use((config) => {
+  config.headers = config.headers || {};
   const token = localStorage.getItem("token");
   if (token) {
-    config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  const csrf = readCookie("clarivo_csrf_token");
+  if (csrf) {
+    config.headers["X-CSRF-Token"] = csrf;
   }
   return config;
 });
