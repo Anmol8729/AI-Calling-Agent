@@ -122,3 +122,58 @@ class TestSingleActiveAdminSessionAndCookies:
         assert 'localStorage.removeItem("token")' in store_src
         assert "withCredentials: true" in api_src
         assert "X-CSRF-Token" in api_src
+
+
+class TestAdminTotpMfaAndMiddleware:
+    def test_totp_verification_and_replay_protection(self):
+        import base64
+        import hashlib
+        import hmac
+        import struct
+        import time
+        from backend.services.auth_service import verify_totp
+
+        raw_secret = b"12345678901234567890"
+        b32_secret = base64.b32encode(raw_secret).decode("ascii")
+        step = int(time.time() // 30)
+        msg = struct.pack(">Q", step)
+        digest = hmac.new(raw_secret, msg, hashlib.sha1).digest()
+        pos = digest[-1] & 0x0F
+        code = f"{(struct.unpack('>I', digest[pos:pos + 4])[0] & 0x7FFFFFFF) % 1_000_000:06d}"
+
+        assert verify_totp(b32_secret, "000000") is False or code == "000000"
+        assert verify_totp(b32_secret, code) is True
+        # Replay of the exact same code within the same window must be rejected
+        assert verify_totp(b32_secret, code) is False
+
+    def test_login_checks_admin_totp_and_redis_idle(self):
+        from backend.routes import auth as auth_routes
+
+        login_src = inspect.getsource(auth_routes.login)
+        cur_src = inspect.getsource(auth_routes.get_current_user)
+        assert "ADMIN_TOTP_SECRET" in login_src
+        assert "verify_totp" in login_src
+        assert "clarivo:admin_idle:" in cur_src
+
+    def test_security_headers_hsts_and_max_body_middleware(self):
+        from starlette.applications import Starlette
+        from starlette.responses import JSONResponse
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+        from backend.middlewares.security import MaxBodySizeMiddleware, SecurityHeadersMiddleware
+
+        async def ok(request):
+            return JSONResponse({"ok": True})
+
+        app = Starlette(routes=[Route("/api/ping", ok, methods=["POST", "GET"])])
+        app.add_middleware(SecurityHeadersMiddleware, hsts=True)
+        app.add_middleware(MaxBodySizeMiddleware, max_bytes=32)
+
+        client = TestClient(app)
+        r_ok = client.get("/api/ping")
+        assert r_ok.status_code == 200
+        assert "strict-transport-security" in {k.lower() for k in r_ok.headers.keys()}
+        assert r_ok.headers.get("x-content-type-options") == "nosniff"
+
+        r_big = client.post("/api/ping", content=b"x" * 100)
+        assert r_big.status_code == 413

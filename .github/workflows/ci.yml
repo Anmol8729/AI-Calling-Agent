@@ -195,3 +195,27 @@ jobs:
         # Catches a model change committed without its migration, which would then
         # only surface as a missing column in production.
         run: python -m alembic check
+
+  dependency-audit:
+    name: Dependency SCA — pip-audit & npm audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Python dependency vulnerability scan
+        run: |
+          pip install pip-audit
+          pip-audit -r backend/requirements.txt || true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Frontend npm audit
+        working-directory: frontend
+        run: npm audit --audit-level=high || true

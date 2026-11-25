@@ -110,3 +110,46 @@ def generate_token() -> str:
 def hash_token(token: str) -> str:
     """SHA-256 hex of a token; only this hash is ever stored at rest."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+# Tracks recently used TOTP counter slices per secret hash to prevent replay within
+# the valid 30-second window.
+_USED_TOTP_WINDOWS: dict[str, int] = {}
+
+
+def verify_totp(secret_b32: str, code: str, window: int = 1) -> bool:
+    """Verify an RFC 6238 6-digit TOTP code against a base32 secret with replay protection."""
+    import base64
+    import hmac
+    import struct
+    import time
+
+    cleaned_secret = "".join((secret_b32 or "").split()).upper()
+    cleaned_code = "".join(ch for ch in (code or "") if ch.isdigit())
+    if not cleaned_secret or len(cleaned_code) != 6:
+        return False
+
+    try:
+        # Pad base32 string if needed
+        pad = (-len(cleaned_secret)) % 8
+        key = base64.b32decode(cleaned_secret + ("=" * pad), casefold=True)
+    except Exception:
+        return False
+
+    now_step = int(time.time() // 30)
+    secret_key = hash_token(cleaned_secret)
+    last_used = _USED_TOTP_WINDOWS.get(secret_key, -1)
+
+    for offset in range(-window, window + 1):
+        step = now_step + offset
+        if step <= last_used:
+            continue
+        msg = struct.pack(">Q", step)
+        digest = hmac.new(key, msg, hashlib.sha1).digest()
+        pos = digest[-1] & 0x0F
+        truncated = struct.unpack(">I", digest[pos : pos + 4])[0] & 0x7FFFFFFF
+        expected = f"{truncated % 1_000_000:06d}"
+        if secrets.compare_digest(cleaned_code, expected):
+            _USED_TOTP_WINDOWS[secret_key] = step
+            return True
+    return False

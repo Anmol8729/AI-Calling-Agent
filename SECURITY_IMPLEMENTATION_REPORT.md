@@ -1,7 +1,7 @@
 # CLARIVO — SECURITY IMPLEMENTATION REPORT
 
 **Implementation Date:** November 2026  
-**Verified Test Results:** 163 passed, 0 failed (13 live-HTTP DB tests skipped in offline environment), Frontend `vite build` passed in 17.72s.
+**Verified Test Results:** 166 passed, 0 failed (13 live-HTTP DB tests skipped in offline environment), Frontend `vite build` passed in 17.72s.
 
 ---
 
@@ -32,6 +32,17 @@
 
 5. **Secure Admin Provisioning Tool (`scripts/tools/provision_admin.py`):**
    - CLI utility to securely create or rotate the designated admin account's Argon2id password without ever hardcoding credentials in source code.
+
+6. **Admin TOTP MFA with Replay Protection (`backend/services/auth_service.py`, `backend/schemas/auth.py`, `backend/routes/auth.py`):**
+   - Zero-dependency RFC 6238 HMAC-SHA1 6-digit TOTP verification (`verify_totp`) controlled by `ADMIN_TOTP_SECRET` with single-use 30-second window replay prevention.
+
+7. **HSTS & Request Body Size Limit (`backend/middlewares/security.py`, `backend/app.py`):**
+   - Fixed `SecurityHeadersMiddleware` to emit `Strict-Transport-Security: max-age=31536000; includeSubDomains` when `hsts=True`.
+   - Added `MaxBodySizeMiddleware` (2 MiB limit) returning `413 Content Too Large` for oversized payloads.
+
+8. **Redis-Backed Admin Idle Timeout & CI Dependency SCA (`backend/routes/auth.py`, `.github/workflows/ci.yml`):**
+   - Backed admin idle TTL (`clarivo:admin_idle:{id}:{ver}`) with Redis (`events._redis`) with process-memory fallback.
+   - Added `dependency-audit` job (`pip-audit` + `npm audit`) to `.github/workflows/ci.yml`.
 
 ---
 

@@ -16,6 +16,7 @@ from backend.services.db import connect_to_db, close_db_connection, get_sessionm
 from backend.services.limiter import limiter
 from backend.middlewares.security import (
     SecurityHeadersMiddleware,
+    MaxBodySizeMiddleware,
     enforce_production_config,
 )
 from backend.jobs.reminder_worker import reminder_loop
@@ -96,6 +97,7 @@ app.add_middleware(
     SecurityHeadersMiddleware,
     hsts=(settings.ENV or "").strip().lower() in ("production", "prod", "staging"),
 )
+app.add_middleware(MaxBodySizeMiddleware, max_bytes=2 * 1024 * 1024)
 
 # CORS configuration — restricted to configured dashboard origins.
 _cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]

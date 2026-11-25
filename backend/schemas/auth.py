@@ -88,6 +88,9 @@ class UserLogin(BaseModel):
     # even if the policy has since been tightened. Length cap only, to bound the
     # bcrypt work an unauthenticated caller can trigger.
     password: str = Field(..., max_length=128)
+    # Optional TOTP 6-digit code; required when ADMIN_TOTP_SECRET is configured
+    # and the designated administrator signs in.
+    otp_code: Optional[str] = Field(default=None, max_length=12)
 
 
 class Token(BaseModel):

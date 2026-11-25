@@ -18,13 +18,14 @@ from backend.services.auth_service import (
     get_password_hash,
     verify_password,
     password_needs_rehash,
+    verify_totp,
     create_access_token,
     decode_access_token,
     generate_token,
     hash_token,
     session_claims,
 )
-from backend.services import login_guard, audit
+from backend.services import login_guard, audit, events
 from backend.services.supabase_auth import SupabaseAuthError, verify_google_token
 from backend.services.email import send_email
 from backend.services.industry_templates import get_template
@@ -167,13 +168,33 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Admin inactivity timeout check
+    # Admin inactivity timeout check (Redis-backed when available, process-memory fallback)
     if is_superadmin(user.email):
         session_key = (str(user.id), current_ver)
+        idle_sec = max(60, int(settings.ADMIN_SESSION_IDLE_MINUTES) * 60)
+        redis_key = f"clarivo:admin_idle:{user.id}:{current_ver}"
+        expired = False
+
+        if events._redis is not None:
+            try:
+                alive = await events._redis.get(redis_key)
+                if alive is None:
+                    # Key expired in Redis (or never recorded on this session)
+                    last_seen = _admin_last_activity.get(session_key)
+                    if last_seen is not None:
+                        expired = True
+                else:
+                    await events._redis.set(redis_key, "1", ex=idle_sec)
+            except Exception:
+                pass
+
         now = datetime.utcnow()
-        idle_limit = timedelta(minutes=max(1, int(settings.ADMIN_SESSION_IDLE_MINUTES)))
+        idle_limit = timedelta(seconds=idle_sec)
         last_seen = _admin_last_activity.get(session_key)
-        if last_seen is not None and (now - last_seen) > idle_limit:
+        if not expired and last_seen is not None and (now - last_seen) > idle_limit:
+            expired = True
+
+        if expired:
             _admin_last_activity.pop(session_key, None)
             user.token_version = current_ver + 1
             await db.commit()
@@ -183,6 +204,11 @@ async def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         _admin_last_activity[session_key] = now
+        if events._redis is not None:
+            try:
+                await events._redis.set(redis_key, "1", ex=idle_sec)
+            except Exception:
+                pass
 
     # Check tenant lifecycle status (approval gate)
     tenant_status = "active"
@@ -805,9 +831,23 @@ async def login(request: Request, response: Response, payload: UserLogin, db: As
     if password_needs_rehash(user.password_hash):
         user.password_hash = get_password_hash(payload.password)
 
-    # Single active session for the designated admin: atomically bump token_version
-    # so any previous admin session on any other device/browser is immediately revoked.
+    # Single active session for the designated admin: enforce MFA (when configured)
+    # and atomically bump token_version so any previous admin session is revoked.
     admin_user = is_superadmin(user.email)
+    if admin_user and (settings.ADMIN_TOTP_SECRET or "").strip():
+        if not verify_totp(settings.ADMIN_TOTP_SECRET, getattr(payload, "otp_code", None) or ""):
+            await audit.record(
+                audit.AUTH_LOGIN_FAILED, actor_email=user.email, clinic_id=user.clinic_id,
+                outcome="failure", detail={"reason": "invalid_or_missing_admin_mfa"},
+                request=request,
+            )
+            return api_response(
+                success=False,
+                message="Multi-factor authentication (TOTP) code is required or invalid.",
+                data={"mfa_required": True},
+                status_code=401,
+            )
+
     if admin_user:
         old_ver = int(getattr(user, "token_version", 0) or 0)
         _admin_last_activity.pop((str(user.id), old_ver), None)
@@ -818,7 +858,14 @@ async def login(request: Request, response: Response, payload: UserLogin, db: As
     await db.refresh(user)
 
     if admin_user:
-        _admin_last_activity[(str(user.id), int(user.token_version or 0))] = datetime.utcnow()
+        new_ver = int(user.token_version or 0)
+        _admin_last_activity[(str(user.id), new_ver)] = datetime.utcnow()
+        if events._redis is not None:
+            try:
+                idle_sec = max(60, int(settings.ADMIN_SESSION_IDLE_MINUTES) * 60)
+                await events._redis.set(f"clarivo:admin_idle:{user.id}:{new_ver}", "1", ex=idle_sec)
+            except Exception:
+                pass
 
     await audit.record(
         audit.AUTH_LOGIN, actor_email=user.email, clinic_id=user.clinic_id,

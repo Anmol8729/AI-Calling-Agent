@@ -9,6 +9,7 @@ import logging
 import secrets
 
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
 from backend.config.settings import settings
@@ -69,7 +70,36 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "base-uri 'self'; "
                 "form-action 'self';",
             )
+        if self._hsts:
+            headers.setdefault(
+                "Strict-Transport-Security",
+                "max-age=31536000; includeSubDomains",
+            )
         return response
+
+
+class MaxBodySizeMiddleware(BaseHTTPMiddleware):
+    """Reject oversized request bodies before parsing to mitigate payload DoS."""
+
+    def __init__(self, app: ASGIApp, *, max_bytes: int = 2 * 1024 * 1024) -> None:
+        super().__init__(app)
+        self._max_bytes = max_bytes
+
+    async def dispatch(self, request, call_next):
+        cl = request.headers.get("content-length")
+        if cl:
+            try:
+                if int(cl) > self._max_bytes:
+                    return JSONResponse(
+                        status_code=413,
+                        content={"success": False, "message": "Request payload too large"},
+                    )
+            except ValueError:
+                return JSONResponse(
+                    status_code=400,
+                    content={"success": False, "message": "Invalid Content-Length header"},
+                )
+        return await call_next(request)
 
 
 def check_production_config() -> list[str]:

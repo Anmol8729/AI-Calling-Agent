@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     ADMIN_SESSION_IDLE_MINUTES: int = int(
         os.getenv("ADMIN_SESSION_IDLE_MINUTES", "30") or "30"
     )
+    ADMIN_TOTP_SECRET: str = os.getenv("ADMIN_TOTP_SECRET", "")
     SUPERADMIN_EMAILS: str = os.getenv("SUPERADMIN_EMAILS", "")
 
     @property
