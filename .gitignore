@@ -60,3 +60,8 @@ docs/PLAN-*.md
 # against localhost. Harmless locally, but a password-guessing loop sitting in a
 # public repo looks like an attack tool and adds nothing to the product.
 test_db_conn.py
+
+# Local tooling, test cache, and internal financial spreadsheets
+.pytest_cache/
+KMS/
+docs/unit_economics_model.csv
